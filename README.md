@@ -18,6 +18,7 @@ based on the ST7701S display controller and FocalTech FT6236 touch controller.
 - Display: MIPI DSI 1-lane, 480x640, RGB888
 - Touch: FocalTech FT6236 on DSI I2C bus (addr 0x38), 5-point multitouch
 - DSI port: DSI0
+- Backlight: Active-low (GPIO22 LOW = on)
 
 ## Supported Platforms
 
@@ -62,6 +63,19 @@ sudo cp p028trm160.dtbo /boot/firmware/overlays/
 | `sizey`         | Touch Y resolution (default 640)      |
 | `disable_touch` | Set to disable the touch controller   |
 | `lanes`         | DSI lanes: 1 (default) or 2           |
+
+## Architecture Notes
+
+The panel driver splits initialization into two stages due to the Raspberry Pi
+RP1 DSI bridge driver's enable ordering:
+
+- **prepare()**: GPIO reset sequence only (runs before DSI PHY is configured)
+- **enable()**: ST7701S init commands, sleep out, display on, backlight
+  (runs after DSI host PHY is fully initialized and active)
+
+This is necessary because the `drm-rp1-dsi` bridge driver configures the DSI
+PHY in its `bridge.pre_enable` callback, which executes *after* the panel's
+`prepare()` in the DRM bridge chain pre-enable (reverse) ordering.
 
 ## Files
 

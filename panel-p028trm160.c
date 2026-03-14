@@ -149,9 +149,6 @@ static int p028trm160_init_sequence(struct mipi_dsi_device *dsi)
 static int p028trm160_prepare(struct drm_panel *panel)
 {
 	struct p028trm160_panel *ctx = to_p028trm160(panel);
-	struct mipi_dsi_device *dsi = ctx->dsi;
-
-	dev_info(&dsi->dev, "prepare: reset + power sequence\n");
 
 	/*
 	 * Only do GPIO power/reset in prepare().
@@ -159,15 +156,13 @@ static int p028trm160_prepare(struct drm_panel *panel)
 	 * configures its PHY in bridge pre_enable, which runs AFTER
 	 * panel prepare() in the DRM bridge chain ordering.
 	 */
-
-	/* Hardware reset sequence: assert reset, then release */
 	if (ctx->reset) {
-		gpiod_set_value_cansleep(ctx->reset, 1);  /* assert reset (pin LOW) */
+		gpiod_set_value_cansleep(ctx->reset, 1);
 		msleep(20);
-		gpiod_set_value_cansleep(ctx->reset, 0);  /* deassert reset (pin HIGH) */
-		msleep(150);  /* Give panel time after reset before DSI commands */
+		gpiod_set_value_cansleep(ctx->reset, 0);
+		msleep(150);
 	} else {
-		msleep(200);  /* Wait for power-on self-reset */
+		msleep(200);
 	}
 
 	return 0;
@@ -179,17 +174,13 @@ static int p028trm160_enable(struct drm_panel *panel)
 	struct mipi_dsi_device *dsi = ctx->dsi;
 	int ret;
 
-	dev_info(&dsi->dev, "enable: sending init sequence (DSI host should be ready)\n");
-
 	/* Send init sequence — DSI host PHY is now configured and active */
 	ret = p028trm160_init_sequence(dsi);
 	if (ret) {
 		dev_err(&dsi->dev, "Panel init sequence failed: %d\n", ret);
 		return ret;
 	}
-	dev_info(&dsi->dev, "enable: init sequence sent OK\n");
 
-	/* Sleep out */
 	ret = mipi_dsi_dcs_exit_sleep_mode(dsi);
 	if (ret) {
 		dev_err(&dsi->dev, "Failed to exit sleep mode: %d\n", ret);
@@ -197,7 +188,6 @@ static int p028trm160_enable(struct drm_panel *panel)
 	}
 	msleep(120);
 
-	/* Display on */
 	ret = mipi_dsi_dcs_set_display_on(dsi);
 	if (ret) {
 		dev_err(&dsi->dev, "Failed to set display on: %d\n", ret);
@@ -205,13 +195,9 @@ static int p028trm160_enable(struct drm_panel *panel)
 	}
 	msleep(20);
 
-	/* Enable backlight */
-	if (ctx->backlight_gpio) {
+	if (ctx->backlight_gpio)
 		gpiod_set_value_cansleep(ctx->backlight_gpio, 1);
-		dev_info(&dsi->dev, "enable: backlight GPIO set HIGH\n");
-	}
 
-	dev_info(&dsi->dev, "enable: panel fully initialized\n");
 	return 0;
 }
 
