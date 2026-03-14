@@ -53,18 +53,13 @@ static inline struct p028trm160_panel *to_p028trm160(struct drm_panel *panel)
 	return container_of(panel, struct p028trm160_panel, panel);
 }
 
-static int p028trm160_dsi_write(struct mipi_dsi_device *dsi, const void *seq, size_t len)
-{
-	return mipi_dsi_generic_write(dsi, seq, len);
-}
-
-#define P028_DSI_WRITE(dsi, seq...)                            \
-	do {                                                     \
-		static const u8 d[] = { seq };                       \
-		int ret;                                             \
-		ret = p028trm160_dsi_write(dsi, d, ARRAY_SIZE(d));   \
-		if (ret < 0)                                         \
-			return ret;                                      \
+#define P028_DSI_WRITE(dsi, seq...)                                    \
+	do {                                                             \
+		static const u8 d[] = { seq };                               \
+		int ret;                                                     \
+		ret = mipi_dsi_dcs_write_buffer(dsi, d, ARRAY_SIZE(d));      \
+		if (ret < 0)                                                 \
+			return ret;                                              \
 	} while (0)
 
 static int p028trm160_init_sequence(struct mipi_dsi_device *dsi)
@@ -155,24 +150,44 @@ static int p028trm160_prepare(struct drm_panel *panel)
 {
 	struct p028trm160_panel *ctx = to_p028trm160(panel);
 	struct mipi_dsi_device *dsi = ctx->dsi;
-	int ret;
 
-	/* Hardware reset sequence */
+	dev_info(&dsi->dev, "prepare: reset + power sequence\n");
+
+	/*
+	 * Only do GPIO power/reset in prepare().
+	 * DSI commands MUST wait for enable() because the rp1-dsi host
+	 * configures its PHY in bridge pre_enable, which runs AFTER
+	 * panel prepare() in the DRM bridge chain ordering.
+	 */
+
+	/* Hardware reset sequence: assert reset, then release */
 	if (ctx->reset) {
-		gpiod_set_value_cansleep(ctx->reset, 1);
-		msleep(1);
-		gpiod_set_value_cansleep(ctx->reset, 0);
-		msleep(1);
-		gpiod_set_value_cansleep(ctx->reset, 1);
-		msleep(10);
+		gpiod_set_value_cansleep(ctx->reset, 1);  /* assert reset (pin LOW) */
+		msleep(20);
+		gpiod_set_value_cansleep(ctx->reset, 0);  /* deassert reset (pin HIGH) */
+		msleep(150);  /* Give panel time after reset before DSI commands */
+	} else {
+		msleep(200);  /* Wait for power-on self-reset */
 	}
 
-	/* Send init sequence */
+	return 0;
+}
+
+static int p028trm160_enable(struct drm_panel *panel)
+{
+	struct p028trm160_panel *ctx = to_p028trm160(panel);
+	struct mipi_dsi_device *dsi = ctx->dsi;
+	int ret;
+
+	dev_info(&dsi->dev, "enable: sending init sequence (DSI host should be ready)\n");
+
+	/* Send init sequence — DSI host PHY is now configured and active */
 	ret = p028trm160_init_sequence(dsi);
 	if (ret) {
 		dev_err(&dsi->dev, "Panel init sequence failed: %d\n", ret);
 		return ret;
 	}
+	dev_info(&dsi->dev, "enable: init sequence sent OK\n");
 
 	/* Sleep out */
 	ret = mipi_dsi_dcs_exit_sleep_mode(dsi);
@@ -191,13 +206,16 @@ static int p028trm160_prepare(struct drm_panel *panel)
 	msleep(20);
 
 	/* Enable backlight */
-	if (ctx->backlight_gpio)
+	if (ctx->backlight_gpio) {
 		gpiod_set_value_cansleep(ctx->backlight_gpio, 1);
+		dev_info(&dsi->dev, "enable: backlight GPIO set HIGH\n");
+	}
 
+	dev_info(&dsi->dev, "enable: panel fully initialized\n");
 	return 0;
 }
 
-static int p028trm160_unprepare(struct drm_panel *panel)
+static int p028trm160_disable(struct drm_panel *panel)
 {
 	struct p028trm160_panel *ctx = to_p028trm160(panel);
 	struct mipi_dsi_device *dsi = ctx->dsi;
@@ -211,8 +229,15 @@ static int p028trm160_unprepare(struct drm_panel *panel)
 	mipi_dsi_dcs_enter_sleep_mode(dsi);
 	msleep(120);
 
+	return 0;
+}
+
+static int p028trm160_unprepare(struct drm_panel *panel)
+{
+	struct p028trm160_panel *ctx = to_p028trm160(panel);
+
 	if (ctx->reset)
-		gpiod_set_value_cansleep(ctx->reset, 0);
+		gpiod_set_value_cansleep(ctx->reset, 1);  /* assert reset (pin LOW) */
 
 	return 0;
 }
@@ -252,6 +277,8 @@ static int p028trm160_get_modes(struct drm_panel *panel,
 
 static const struct drm_panel_funcs p028trm160_funcs = {
 	.prepare = p028trm160_prepare,
+	.enable = p028trm160_enable,
+	.disable = p028trm160_disable,
 	.unprepare = p028trm160_unprepare,
 	.get_modes = p028trm160_get_modes,
 };
