@@ -30,8 +30,9 @@
 				reg = <0x38>;
 				/* No interrupt-parent/interrupts — driver will use polling mode */
 				reset-gpios = <&gpio 6 1>; /* GPIO6, active low */
-				touchscreen-size-x = <480>;
-				touchscreen-size-y = <640>;
+				/* FT6336U reports coords in 240x320; display server scales to 480x640 */
+				touchscreen-size-x = <240>;
+				touchscreen-size-y = <320>;
 			};
 		};
 	};
