@@ -22,7 +22,8 @@ based on the ST7701S display controller and FocalTech FT6236 touch controller.
 
 ## Supported Platforms
 
-- Raspberry Pi Compute Module 5
+- Raspberry Pi 5 Model B（DSI0 / DSI1 均已验证）
+- Raspberry Pi Compute Module 5（DSI0 已验证；DSI1 触摸需 CM5 IO Board J6 跳线，见 [doc/cm5-io-board-dsi1-i2c-issue.md](doc/cm5-io-board-dsi1-i2c-issue.md)）
 
 ## Build & Install
 
@@ -58,12 +59,23 @@ dtoverlay=p028trm160-dsi1
 > **Note:** Only one overlay should be active at a time. The `install.sh` script
 > handles this automatically.
 
-### DSI1 Touch Note
+### DSI1 I2C Notes
 
-On the CM5 IO Board, DSI1's I2C bus routes through GPIO0/GPIO1.
-If touch is not detected after switching to DSI1, check:
-1. FPC cable orientation at the DSI1 connector (try flipping contacts up/down)
-2. The I2C bus can be verified with: `sudo i2cdetect -y 0` (look for `38`)
+- **Pi 5 Model B**: DSI1 触摸即插即用，I2C bus 11，无需额外配置。
+- **CM5 IO Board**: DSI1 的 I2C 线路需要通过 **J6 跳线帽** 桥接才能连通。
+  不短接 J6 时触摸芯片无法被检测到。详见 [doc/cm5-io-board-dsi1-i2c-issue.md](doc/cm5-io-board-dsi1-i2c-issue.md)。
+
+验证 I2C 连通性：
+```bash
+# Pi 5 DSI1
+sudo i2cdetect -y 11   # 应在 0x38 看到 UU 或 38
+
+# CM5 DSI0
+sudo i2cdetect -y 10   # 应在 0x38 看到 UU 或 38
+
+# CM5 DSI1（需 J6 跳线）
+sudo i2cdetect -y 0    # 应在 0x38 看到 UU 或 38
+```
 
 ## Manual Build
 
@@ -89,8 +101,8 @@ sudo cp p028trm160*.dtbo /boot/firmware/overlays/
 
 | Parameter       | Description                           |
 | --------------- | ------------------------------------- |
-| `sizex`         | Touch X resolution (default 480)      |
-| `sizey`         | Touch Y resolution (default 640)      |
+| `sizex`         | Touch X resolution (default 240)      |
+| `sizey`         | Touch Y resolution (default 320)      |
 | `disable_touch` | Set to disable the touch controller   |
 | `lanes`         | DSI lanes: 1 (default) or 2           |
 

@@ -6,9 +6,20 @@ https://pip.raspberrypi.com/categories/1098-design-files
 
 https://pip-assets.raspberrypi.com/categories/1098-design-files/documents/RP-008099-DD-1-CM5%20IO%20Board,%20revision%202,%20KiCAD%20files..zip
 
-> **状态：待验证**
+> **状态：CM5 IO Board 待验证 ｜ Pi 5 已验证通过（DSI1 触摸正常）**
 
-## 问题描述
+## Pi 5 验证结果（2026-03-14）
+
+在 Raspberry Pi 5 Model B Rev 1.1 上测试 DSI1，**显示和触摸均正常工作**，无需任何跳线：
+
+- 显示：`card1-DSI-2` connected, enabled
+- 触摸：I2C bus 11, 地址 0x38 (UU)，驱动 `edt_ft5x06` 成功绑定
+- 输入设备：`11-0038 generic ft5x06 (88)` → `/dev/input/event5`
+- 坐标范围：ABS_X 0-239, ABS_Y 0-319
+
+Pi 5 板载 DSI1 FPC 连接器的 I2C 直连到 SoC，不存在 CM5 IO Board 的 J6 跳线问题。
+
+## 问题描述（CM5 IO Board）
 
 P028TRM160-IPS-CTP 2.8寸 DSI 屏幕接在 CM5 IO Board 的 DSI1 接口时，显示正常但触摸（FT6336U, I2C 地址 0x38）完全无响应。`i2cdetect` 扫描 bus 0（i2c_csi_dsi1）全部为空，无任何 ACK。
 
@@ -40,7 +51,7 @@ J6 是一个 2×2 排针，作用是将 CM5 的 ID_EEPROM I2C 总线桥接到 DS
 
 DSI0 的 I2C（SCL0/SDA0）直接连线到 CM5，无需跳线，所以即插即用。
 
-## 解决方案（待验证）
+## 解决方案（CM5 IO Board，待验证）
 
 在 CM5 IO Board 上找到 **J6** 排针（2×2 pin header），安装两个跳线帽：
 
