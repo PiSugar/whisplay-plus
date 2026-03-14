@@ -56,7 +56,7 @@
 				reg = <0>;
 
 				reset-gpios = <&gpio 24 1>; /* GPIO24, active low */
-				backlight-gpios = <&gpio 22 0>; /* GPIO22, active high */
+				backlight-gpios = <&gpio 22 1>; /* GPIO22, active low */
 
 				dsi-lanes = <1>;
 
