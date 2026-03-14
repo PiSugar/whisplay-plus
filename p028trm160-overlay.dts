@@ -1,0 +1,94 @@
+/*
+ * Device Tree Overlay for P028TRM160-IPS-CTP 2.8" 480x640 DSI Panel
+ * with ST7701S controller and touch controller
+ *
+ * Connected to DSI0 on Raspberry Pi CM5
+ *
+ * GPIO Mapping (40-pin header):
+ *   LEDC  (Backlight)  : GPIO22 (Pin 15)
+ *   RST   (Panel Reset): GPIO24 (Pin 18)
+ *   TPRST (Touch Reset): GPIO13 (Pin 33)
+ *   TPINT (Touch INT)  : GPIO6  (Pin 31)
+ */
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2835";
+
+	/* Fragment 0: Touch screen on DSI0-associated I2C bus */
+	fragment@0 {
+		target = <&i2c_csi_dsi0>;
+		i2c_frag: __overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			ft6236: ft6236@38 {
+				compatible = "edt,edt-ft5406";
+				reg = <0x38>;
+				interrupt-parent = <&gpio>;
+				interrupts = <6 2>; /* GPIO6, IRQ_TYPE_EDGE_FALLING */
+				reset-gpios = <&gpio 13 1>; /* GPIO13, active low */
+				touchscreen-size-x = <480>;
+				touchscreen-size-y = <640>;
+			};
+		};
+	};
+
+	/* Fragment 1: DSI0 panel */
+	fragment@1 {
+		target = <&dsi0>;
+		dsi_frag: __overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			port {
+				dsi_out: endpoint {
+					remote-endpoint = <&panel_in>;
+				};
+			};
+
+			panel: panel@0 {
+				compatible = "pisugar,p028trm160";
+				reg = <0>;
+
+				reset-gpios = <&gpio 24 1>; /* GPIO24, active low */
+				backlight-gpios = <&gpio 22 0>; /* GPIO22, active high */
+
+				dsi-lanes = <1>;
+
+				port {
+					panel_in: endpoint {
+						remote-endpoint = <&dsi_out>;
+					};
+				};
+			};
+		};
+	};
+
+	/* Fragment 2: Enable I2C0 interface */
+	fragment@2 {
+		target = <&i2c0if>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	/* Fragment 3: Enable I2C0 mux */
+	fragment@3 {
+		target = <&i2c0mux>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	__overrides__ {
+		sizex = <&ft6236>, "touchscreen-size-x:0";
+		sizey = <&ft6236>, "touchscreen-size-y:0";
+		disable_touch = <&ft6236>, "status=disabled";
+		lanes = <&panel>, "dsi-lanes:0";
+	};
+};
