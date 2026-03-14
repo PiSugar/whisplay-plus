@@ -7,8 +7,8 @@
  * GPIO Mapping (40-pin header):
  *   LEDC  (Backlight)  : GPIO22 (Pin 15)
  *   RST   (Panel Reset): GPIO24 (Pin 18)
- *   TPRST (Touch Reset): GPIO13 (Pin 33)
- *   TPINT (Touch INT)  : GPIO6  (Pin 31)
+ *   TPRST (Touch Reset): GPIO6  (Pin 31)
+ *   TPINT (Touch INT)  : GPIO13 (Pin 33)
  */
 
 /dts-v1/;
@@ -28,9 +28,8 @@
 			ft6236: ft6236@38 {
 				compatible = "edt,edt-ft5406";
 				reg = <0x38>;
-				interrupt-parent = <&gpio>;
-				interrupts = <6 2>; /* GPIO6, IRQ_TYPE_EDGE_FALLING */
-				reset-gpios = <&gpio 13 1>; /* GPIO13, active low */
+				/* No interrupt-parent/interrupts — driver will use polling mode */
+				reset-gpios = <&gpio 6 1>; /* GPIO6, active low */
 				touchscreen-size-x = <480>;
 				touchscreen-size-y = <640>;
 			};
