@@ -64,6 +64,28 @@ sudo cp p028trm160.dtbo /boot/firmware/overlays/
 | `disable_touch` | Set to disable the touch controller   |
 | `lanes`         | DSI lanes: 1 (default) or 2           |
 
+## Touch Mode
+
+The touch panel has two operating modes controlled by the labwc compositor:
+
+| Mode | Behavior | Use Case |
+| ---- | -------- | -------- |
+| **Native touch** | Swipe to scroll, tap to click | Web browsing, document reading |
+| **Mouse emulation** | Touch acts as mouse cursor, drag to select | Text selection, precise control |
+
+Toggle between modes:
+
+```bash
+# Toggle (switches to the other mode)
+./toggle-touch-mode.sh
+
+# Switch to specific mode
+./toggle-touch-mode.sh touch   # swipe = scroll
+./toggle-touch-mode.sh mouse   # drag = select
+```
+
+The script modifies `~/.config/labwc/rc.xml` and hot-reloads labwc — no reboot needed.
+
 ## Architecture Notes
 
 The panel driver splits initialization into two stages due to the Raspberry Pi
@@ -83,6 +105,7 @@ PHY in its `bridge.pre_enable` callback, which executes *after* the panel's
 - `p028trm160-overlay.dts` — Device tree overlay (DSI0 + FT6236 touch)
 - `Makefile` — Kernel module build
 - `install.sh` — Automated build & install script
+- `toggle-touch-mode.sh` — Toggle touch between native touch and mouse emulation
 - `doc/` — Hardware documentation and datasheets
 
 
