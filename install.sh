@@ -39,7 +39,16 @@ echo "Using DSI${DSI_PORT} for display/touch overlay build."
 # 1. Install build dependencies
 echo "[1/6] Installing build dependencies..."
 apt-get update -qq
-apt-get install -y raspberrypi-kernel-headers device-tree-compiler
+if ! apt-get install -y raspberrypi-kernel-headers device-tree-compiler; then
+    echo "  raspberrypi-kernel-headers not available, trying linux-headers fallback..."
+    apt-get install -y \
+        device-tree-compiler \
+        "linux-headers-$(uname -r)" || \
+    apt-get install -y \
+        device-tree-compiler \
+        linux-headers-rpi-2712 \
+        linux-headers-rpi-v8
+fi
 
 # 2. Build kernel module
 echo "[2/6] Building panel driver module..."
