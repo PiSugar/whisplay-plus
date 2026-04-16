@@ -143,28 +143,51 @@ static int p028trm160_init_sequence(struct mipi_dsi_device *dsi)
 	/* Disable command2 (back to User Command) */
 	P028_DSI_WRITE(dsi, DSI_CMD2BKX_SEL, 0x77, 0x01, 0x00, 0x00, 0x00);
 
+	/* Vendor init doesn't include SET_PIXEL_FORMAT; panel default is RGB888 */
+
 	return 0;
 }
 
 static int p028trm160_prepare(struct drm_panel *panel)
 {
 	struct p028trm160_panel *ctx = to_p028trm160(panel);
+	struct mipi_dsi_device *dsi = ctx->dsi;
+	int ret;
 
-	/*
-	 * Only do GPIO power/reset in prepare().
-	 * DSI commands MUST wait for enable() because the rp1-dsi host
-	 * configures its PHY in bridge pre_enable, which runs AFTER
-	 * panel prepare() in the DRM bridge chain ordering.
-	 */
+	dev_info(&dsi->dev, "prepare() called\n");
+
+	/* Hardware reset */
 	if (ctx->reset) {
 		gpiod_set_value_cansleep(ctx->reset, 1);
-		msleep(20);
+		msleep(50);
 		gpiod_set_value_cansleep(ctx->reset, 0);
-		msleep(150);
-	} else {
 		msleep(200);
 	}
 
+	/* Send init sequence while DSI is still in LP/command mode */
+	ret = p028trm160_init_sequence(dsi);
+	if (ret) {
+		dev_err(&dsi->dev, "Panel init sequence failed: %d\n", ret);
+		return ret;
+	}
+	dev_info(&dsi->dev, "init_sequence OK\n");
+
+	ret = mipi_dsi_dcs_exit_sleep_mode(dsi);
+	if (ret) {
+		dev_err(&dsi->dev, "Failed to exit sleep mode: %d\n", ret);
+		return ret;
+	}
+	dev_info(&dsi->dev, "exit_sleep_mode OK, waiting 120ms\n");
+	msleep(120);
+
+	/* INVON after sleep_out - white background makes video effect visible */
+	{
+		static const u8 invon_cmd[] = { 0x21 };
+		ret = mipi_dsi_dcs_write_buffer(dsi, invon_cmd, sizeof(invon_cmd));
+		dev_info(&dsi->dev, "INVON ret=%d\n", ret);
+	}
+
+	dev_info(&dsi->dev, "prepare() done\n");
 	return 0;
 }
 
@@ -174,30 +197,20 @@ static int p028trm160_enable(struct drm_panel *panel)
 	struct mipi_dsi_device *dsi = ctx->dsi;
 	int ret;
 
-	/* Send init sequence — DSI host PHY is now configured and active */
-	ret = p028trm160_init_sequence(dsi);
-	if (ret) {
-		dev_err(&dsi->dev, "Panel init sequence failed: %d\n", ret);
-		return ret;
-	}
-
-	ret = mipi_dsi_dcs_exit_sleep_mode(dsi);
-	if (ret) {
-		dev_err(&dsi->dev, "Failed to exit sleep mode: %d\n", ret);
-		return ret;
-	}
-	msleep(120);
+	dev_info(&dsi->dev, "enable() called\n");
 
 	ret = mipi_dsi_dcs_set_display_on(dsi);
 	if (ret) {
 		dev_err(&dsi->dev, "Failed to set display on: %d\n", ret);
 		return ret;
 	}
+	dev_info(&dsi->dev, "display_on OK\n");
 	msleep(20);
 
 	if (ctx->backlight_gpio)
 		gpiod_set_value_cansleep(ctx->backlight_gpio, 1);
 
+	dev_info(&dsi->dev, "enable() done\n");
 	return 0;
 }
 
@@ -229,17 +242,24 @@ static int p028trm160_unprepare(struct drm_panel *panel)
 }
 
 static const struct drm_display_mode p028trm160_mode = {
-	.clock		= 22680,	/* (480+44+46+2) * (640+12+2+2) * 60 / 1000 */
+	/*
+	 * Horizontal: htotal must match INVSEL RTNI register (C2h param2).
+	 * RTNI=6 => PCLK = 512 + (6 * 16) = 608.
+	 * Vertical: VBP=12, VFP=2 from PORCTRL (C1h). VSYNC=10.
+	 * Clock: 608 * 664 * 60 / 1000 = 24223 kHz
+	 */
+	.clock		= 24223,
 	.hdisplay	= 480,
-	.hsync_start	= 480 + 46,	/* hactive + hfp */
-	.hsync_end	= 480 + 46 + 2,	/* hactive + hfp + hsync */
-	.htotal		= 480 + 46 + 2 + 44,	/* hactive + hfp + hsync + hbp */
+	.hsync_start	= 480 + 64,	/* hactive + hfp */
+	.hsync_end	= 480 + 64 + 4,	/* hactive + hfp + hsync */
+	.htotal		= 480 + 64 + 4 + 60,	/* hactive + hfp + hsync + hbp = 608 */
 	.vdisplay	= 640,
 	.vsync_start	= 640 + 2,	/* vactive + vfp */
-	.vsync_end	= 640 + 2 + 2,	/* vactive + vfp + vsync */
-	.vtotal		= 640 + 2 + 2 + 12,	/* vactive + vfp + vsync + vbp */
+	.vsync_end	= 640 + 2 + 10,	/* vactive + vfp + vsync */
+	.vtotal		= 640 + 2 + 10 + 12,	/* vactive + vfp + vsync + vbp */
 	.width_mm	= 43,
 	.height_mm	= 57,
+	.flags		= DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC,
 	.type		= DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED,
 };
 
@@ -285,7 +305,7 @@ static int p028trm160_probe(struct mipi_dsi_device *dsi)
 	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
 			  MIPI_DSI_MODE_LPM;
 	dsi->format = MIPI_DSI_FMT_RGB888;
-	dsi->lanes = 1;
+	dsi->lanes = 2;
 
 	/* Check device tree for lane count override */
 	of_property_read_u32(dev->of_node, "dsi-lanes", &dsi->lanes);
@@ -304,6 +324,7 @@ static int p028trm160_probe(struct mipi_dsi_device *dsi)
 
 	drm_panel_init(&ctx->panel, dev, &p028trm160_funcs,
 		       DRM_MODE_CONNECTOR_DSI);
+	ctx->panel.prepare_prev_first = true;
 
 	ret = drm_panel_of_backlight(&ctx->panel);
 	if (ret)

@@ -11,7 +11,7 @@ based on the ST7701S display controller and FocalTech FT6236 touch controller.
 | 5V             | Pin 4            |        |
 | GND            | Pin 14           |        |
 | LEDC (BL)      | Pin 15           | GPIO22 |
-| RST (Display)  | Pin 18           | GPIO24 |
+| RST (Display)  | Pin 7            | GPIO4  |
 | TPRST (Touch)  | Pin 33           | GPIO13 |
 | TPINT (Touch)  | Pin 31           | GPIO6  |
 

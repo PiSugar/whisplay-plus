@@ -6,7 +6,7 @@
  *
  * GPIO Mapping (40-pin header):
  *   LEDC  (Backlight)  : GPIO22 (Pin 15)
- *   RST   (Panel Reset): GPIO24 (Pin 18)
+ *   RST   (Panel Reset): GPIO4  (Pin 7)
  *   TPRST (Touch Reset): GPIO6  (Pin 31)
  *   TPINT (Touch INT)  : GPIO13 (Pin 33)
  */
@@ -48,6 +48,8 @@
 			port {
 				dsi_out: endpoint {
 					remote-endpoint = <&panel_in>;
+					data-lanes = <1 2>;
+					lane-polarities = <0 0 0>;
 				};
 			};
 
@@ -55,10 +57,10 @@
 				compatible = "pisugar,p028trm160";
 				reg = <0>;
 
-				reset-gpios = <&gpio 24 1>; /* GPIO24, active low */
-				backlight-gpios = <&gpio 22 1>; /* GPIO22, active low */
+				reset-gpios = <&gpio 4 1>; /* GPIO4, active low */
+				backlight-gpios = <&gpio 22 0>; /* GPIO22, active high (XC6219 CE) */
 
-				dsi-lanes = <1>;
+				dsi-lanes = <2>;
 
 				port {
 					panel_in: endpoint {
@@ -90,5 +92,8 @@
 		sizey = <&ft6236>, "touchscreen-size-y:0";
 		disable_touch = <&ft6236>, "status=disabled";
 		lanes = <&panel>, "dsi-lanes:0";
+		clk_inv = <&dsi_out>, "lane-polarities:0";
+		d0_inv = <&dsi_out>, "lane-polarities:4";
+		d1_inv = <&dsi_out>, "lane-polarities:8";
 	};
 };

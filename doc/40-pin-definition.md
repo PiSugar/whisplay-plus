@@ -6,7 +6,7 @@ GPIO TABLE OF 40-PIN HEADER
 | 5V     | Pin 4            |        |
 | GND    | Pin 14           |        |
 | LEDC   | Pin 15           | GPIO22 |
-| RST    | Pin 18           | GPIO24 |
+| RST    | Pin 7            | GPIO4  |
 | TPRST  | Pin 31           | GPIO6  |
 | TPINT  | Pin 33           | GPIO13 |
 

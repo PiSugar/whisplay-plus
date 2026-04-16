@@ -46,6 +46,13 @@ echo "=== Installing kernel module ==="
 sudo cp panel-p028trm160.ko /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/panel/
 sudo depmod -a
 
+# Update initramfs so the module is available at early boot
+if [ -x /usr/sbin/update-initramfs ]; then
+    echo ""
+    echo "=== Updating initramfs ==="
+    sudo update-initramfs -u -k "$(uname -r)"
+fi
+
 echo ""
 echo "=== Installing device tree overlay ==="
 sudo cp "${OVERLAY_NAME}.dtbo" /boot/firmware/overlays/
