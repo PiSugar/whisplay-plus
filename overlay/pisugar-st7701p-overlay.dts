@@ -1,8 +1,8 @@
 /*
  * Device Tree Overlay for PiSugar 2.8" ST7701P MIPI-DSI display
  *
- * Panel:  ST7701P 480x640, 2-lane MIPI-DSI on dsi1
- * Touch:  FT6336U @ 0x38 on i2c_csi_dsi1, polling mode (no IRQ)
+ * Panel:  ST7701P 480x640, 2-lane MIPI-DSI on selected DSI port
+ * Touch:  FT6336U @ 0x38 on matching i2c_csi_dsi bus, polling mode (no IRQ)
  *
  * GPIO allocation:
  *   GPIO4   - Panel reset   (active-low)
@@ -13,15 +13,30 @@
  * Touch uses edt_ft5x06 kernel driver in timer-based polling mode
  * (17ms interval) since the INT line is not wired through DSI connector.
  */
+
+#ifndef DSI_PORT
+#define DSI_PORT 0
+#endif
+
+#if DSI_PORT == 1
+#define DSI_NODE dsi1
+#define DSI_I2C_NODE i2c_csi_dsi1
+#define DSI_OUT_ENDPOINT dsi1_out_panel
+#else
+#define DSI_NODE dsi0
+#define DSI_I2C_NODE i2c_csi_dsi0
+#define DSI_OUT_ENDPOINT dsi0_out_panel
+#endif
+
 /dts-v1/;
 /plugin/;
 
 / {
 	compatible = "brcm,bcm2712";
 
-	/* Fragment 0: MIPI-DSI panel on dsi1 */
+	/* Fragment 0: MIPI-DSI panel on selected port */
 	fragment@0 {
-		target = <&dsi1>;
+		target = <&DSI_NODE>;
 		__overlay__ {
 			status = "okay";
 			#address-cells = <1>;
@@ -36,7 +51,7 @@
 
 				port {
 					panel_in: endpoint {
-						remote-endpoint = <&dsi1_out_panel>;
+						remote-endpoint = <&DSI_OUT_ENDPOINT>;
 					};
 				};
 			};
@@ -44,7 +59,7 @@
 			ports {
 				port@0 {
 					reg = <0>;
-					dsi1_out_panel: endpoint {
+					DSI_OUT_ENDPOINT: endpoint {
 						remote-endpoint = <&panel_in>;
 						data-lanes = <0 1>;
 					};
@@ -55,7 +70,7 @@
 
 	/* Fragment 1: FT6336U touch on DSI connector I2C bus */
 	fragment@1 {
-		target = <&i2c_csi_dsi1>;
+		target = <&DSI_I2C_NODE>;
 		__overlay__ {
 			status = "okay";
 

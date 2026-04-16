@@ -7,8 +7,34 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OVERLAY_NAME="pisugar-st7701p"
 MODULE_NAME="st7701p_pisugar"
 CONFIG="/boot/firmware/config.txt"
+MODEL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null || true)"
+DSI_PORT=0
 
 echo "=== PiSugar ST7701P Display Driver Installer ==="
+
+# On Pi 5 / CM5, allow user to choose DSI0 or DSI1 at install time.
+if echo "$MODEL" | grep -Eq "Raspberry Pi 5|Compute Module 5"; then
+    echo "Detected platform: $MODEL"
+    if [ -t 0 ]; then
+        while true; do
+            read -r -p "Select DSI port [0/1] (default: 0): " DSI_INPUT
+            DSI_INPUT="${DSI_INPUT:-0}"
+            case "$DSI_INPUT" in
+                0|1)
+                    DSI_PORT="$DSI_INPUT"
+                    break
+                    ;;
+                *)
+                    echo "  Invalid input. Please enter 0 or 1."
+                    ;;
+            esac
+        done
+    else
+        echo "Non-interactive shell detected, defaulting to DSI0."
+    fi
+fi
+
+echo "Using DSI${DSI_PORT} for display/touch overlay build."
 
 # 1. Install build dependencies
 echo "[1/6] Installing build dependencies..."
@@ -34,10 +60,10 @@ echo "$MODULE_NAME" > /etc/modules-load.d/${MODULE_NAME}.conf
 echo "[4/6] Building and installing device tree overlay..."
 cd "$SCRIPT_DIR/overlay"
 cpp -nostdinc -I /usr/src/linux-headers-$(uname -r | sed 's/-v8.*/-common-rpi/;s/-2712.*/-common-rpi/')/include \
-    -undef -x assembler-with-cpp ${OVERLAY_NAME}-overlay.dts | \
+    -undef -x assembler-with-cpp -DDSI_PORT=${DSI_PORT} ${OVERLAY_NAME}-overlay.dts | \
     dtc -@ -I dts -O dtb -o ${OVERLAY_NAME}.dtbo - 2>/dev/null || \
 cpp -nostdinc -I /usr/src/linux-headers-*-common-rpi/include \
-    -undef -x assembler-with-cpp ${OVERLAY_NAME}-overlay.dts | \
+    -undef -x assembler-with-cpp -DDSI_PORT=${DSI_PORT} ${OVERLAY_NAME}-overlay.dts | \
     dtc -@ -I dts -O dtb -o ${OVERLAY_NAME}.dtbo -
 cp ${OVERLAY_NAME}.dtbo /boot/firmware/overlays/
 
