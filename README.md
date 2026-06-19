@@ -22,7 +22,7 @@
 | 面板复位 (RST) | GPIO4 | 低 | MIPI-DSI 面板复位 |
 | 背光使能 (LEDC) | GPIO22 | 低 | 背光 PWM 使能 |
 | 触摸复位 (TPRST) | GPIO6 | 低 | FT6336U 硬件复位 |
-| 触摸中断 (TPINT) | GPIO13 | — | *未连通（采用轮询模式）* |
+| 触摸中断 (TPINT) | GPIO13 | 下降沿 | FT6336U 中断输入 |
 
 ---
 
@@ -218,19 +218,19 @@ Porch: H=(30, 12, 30), V=(20, 4, 20)
 - Compatible：`focaltech,ft6236`
 - I2C 地址：0x38
 - 总线：`i2c_csi_dsi1`（DSI 连接器内置 I2C）
+- 中断：GPIO13，下降沿触发
 
 **特殊说明**：
-- GPIO13（触摸中断线）在此硬件上**未物理连通**
-- 驱动自动回退到**定时器轮询模式**：
-  - 轮询间隔：17ms（约 60fps）
-  - 无需配置，驱动自动启用
-  - 触摸响应延迟 < 50ms，体感流畅
+- overlay 已配置 `interrupt-parent` / `interrupts`，`edt_ft5x06` 使用 TPINT 中断上报触摸事件
+- 若触摸无响应，优先检查 GPIO13/TPINT 连线和下降沿中断计数
 
 **触摸校准**（如需）：
 编辑 `overlay/pisugar-st7701p-overlay.dts`：
 
 ```dts
 touch@38 {
+    interrupt-parent = <&gpio>;
+    interrupts = <13 2>;       // GPIO13, falling edge
     touchscreen-size-x = <480>;
     touchscreen-size-y = <640>;
     touchscreen-inverted-x;    // 如需翻转 X 轴

@@ -10,7 +10,7 @@
  *   RST   -> GPIO4   (panel reset, active-low)
  *   LEDC  -> GPIO22  (backlight enable, active-low)
  *   TPRST -> GPIO6   (touch reset, active-low, in overlay)
- *   TPINT -> GPIO13  (touch interrupt, unused - polling mode)
+ *   TPINT -> GPIO13  (touch interrupt, falling-edge, in overlay)
  *
  * Init sequence from: "2.8TR+ST7701S MIPI 2Lane .txt"
  */

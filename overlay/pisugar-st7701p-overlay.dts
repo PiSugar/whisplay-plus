@@ -2,16 +2,15 @@
  * Device Tree Overlay for PiSugar 2.8" ST7701P MIPI-DSI display
  *
  * Panel:  ST7701P 480x640, 2-lane MIPI-DSI on selected DSI port
- * Touch:  FT6336U @ 0x38 on matching i2c_csi_dsi bus, polling mode (no IRQ)
+ * Touch:  FT6336U @ 0x38 on matching i2c_csi_dsi bus, interrupt mode
  *
  * GPIO allocation:
  *   GPIO4   - Panel reset   (active-low)
  *   GPIO22  - Backlight      (active-low)
  *   GPIO6   - Touch reset   (active-low)
- *   GPIO13  - Touch IRQ     (active-low, physically not connected on this HW)
+ *   GPIO13  - Touch IRQ     (falling-edge interrupt)
  *
- * Touch uses edt_ft5x06 kernel driver in timer-based polling mode
- * (17ms interval) since the INT line is not wired through DSI connector.
+ * Touch uses the edt_ft5x06 kernel driver with TPINT wired as an IRQ.
  */
 
 #ifndef DSI_PORT
@@ -78,10 +77,11 @@
 				compatible = "focaltech,ft6236";
 				reg = <0x38>;
 				reset-gpios = <&gpio 6 1>;  /* GPIO6, active-low */
+				interrupt-parent = <&gpio>;
+				interrupts = <13 2>;        /* GPIO13, falling edge */
 				touchscreen-size-x = <480>;
 				touchscreen-size-y = <640>;
 				status = "okay";
-				/* No interrupts - edt_ft5x06 falls back to polling */
 			};
 		};
 	};
