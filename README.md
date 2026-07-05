@@ -216,10 +216,10 @@ Porch: H=(30, 12, 30), V=(20, 4, 20)
 `st7701p_pisugar` 支持在 `/etc/modprobe.d/st7701p_pisugar.conf` 中配置显示链路和面板初始化参数，例如：
 
 ```ini
-options st7701p_pisugar video_mode=burst pixel_format=rgb888 dsi_lpm=1 dsi_non_continuous_clock=1 mode_clock_khz=26800 mode_hfp=30 mode_hsync=12 mode_hbp=30 mode_vfp=20 mode_vsync=4 mode_vbp=20 gip_e5e8_variant=rg28xx
+options st7701p_pisugar video_mode=burst pixel_format=rgb888 dsi_lpm=1 dsi_non_continuous_clock=1 mode_clock_khz=26800 mode_hfp=30 mode_hsync=12 mode_hbp=30 mode_vfp=20 mode_vsync=4 mode_vbp=20 gip_e5e8_variant=vendor-tail-3ca0
 ```
 
-`gip_e5e8_variant` 用于选择 BK1 E5/E8 GIP/source 映射。默认 `rg28xx` 在蓝绿斜向渐变边缘上可减轻亮点/斜亮线；如果需要回到供应商原始序列，可设为 `vendor`，然后重启验证：
+`gip_e5e8_variant` 用于选择 BK1 E5/E8 GIP/source 映射。默认 `vendor-tail-3ca0` 在保持 KDE 文字清晰度的同时减轻蓝绿斜向渐变边缘的亮点/斜亮线；如果需要回到供应商原始序列，可设为 `vendor`，然后重启验证：
 
 ```ini
 options st7701p_pisugar gip_e5e8_variant=vendor
