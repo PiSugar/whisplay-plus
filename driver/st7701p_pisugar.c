@@ -84,7 +84,7 @@ static char *pixel_format = "rgb888";
 module_param(pixel_format, charp, 0644);
 MODULE_PARM_DESC(pixel_format, "DSI pixel format: rgb888 or rgb666");
 
-static char *gip_e5e8_variant = "rg28xx";
+static char *gip_e5e8_variant = "vendor-tail-3ca0";
 module_param(gip_e5e8_variant, charp, 0644);
 MODULE_PARM_DESC(gip_e5e8_variant, "GIP E5/E8 mapping variant: rg28xx, vendor-tail-3ca0, or vendor");
 
