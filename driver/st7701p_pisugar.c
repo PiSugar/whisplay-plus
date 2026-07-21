@@ -4,13 +4,13 @@
  *
  * Hardware:
  *   Panel:  ST7701P, 480x640, MIPI-DSI 2-lane, RGB888
- *   Touch:  FT6336U on i2c_csi_dsi1 (handled by kernel edt_ft5x06)
+ *   Touch:  GT911 on matching DSI I2C bus (handled by kernel goodix_ts)
  *
  * GPIO mapping (active-low accent):
  *   RST   -> GPIO4   (panel reset, active-low)
  *   LEDC  -> GPIO22  (backlight enable, active-low)
  *   TPRST -> GPIO6   (touch reset, active-low, in overlay)
- *   TPINT -> GPIO13  (touch interrupt, unused - polling mode)
+ *   TPINT -> GPIO13  (touch interrupt, active-low)
  *
  * Init sequence from: "2.8TR+ST7701S MIPI 2Lane .txt"
  */

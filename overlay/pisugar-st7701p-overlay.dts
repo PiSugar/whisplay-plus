@@ -2,16 +2,17 @@
  * Device Tree Overlay for PiSugar 2.8" ST7701P MIPI-DSI display
  *
  * Panel:  ST7701P 480x640, 2-lane MIPI-DSI on selected DSI port
- * Touch:  FT6336U @ 0x38 on matching i2c_csi_dsi bus, polling mode (no IRQ)
+ * Touch:  GT911 @ 0x5d on matching i2c_csi_dsi bus
  *
  * GPIO allocation:
  *   GPIO4   - Panel reset   (active-low)
  *   GPIO22  - Backlight      (active-low)
  *   GPIO6   - Touch reset   (active-low)
- *   GPIO13  - Touch IRQ     (active-low, physically not connected on this HW)
+ *   GPIO13  - Touch IRQ     (active-low)
  *
- * Touch uses edt_ft5x06 kernel driver in timer-based polling mode
- * (17ms interval) since the INT line is not wired through DSI connector.
+ * Touch uses the in-tree Goodix driver. The driver temporarily drives the INT
+ * line low during reset to select the GT911 I2C address 0x5d, then switches it
+ * back to an active-low interrupt input.
  */
 
 #ifndef DSI_PORT
@@ -57,6 +58,9 @@
 			};
 
 			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
 				port@0 {
 					reg = <0>;
 					DSI_OUT_ENDPOINT: endpoint {
@@ -68,20 +72,40 @@
 		};
 	};
 
-	/* Fragment 1: FT6336U touch on DSI connector I2C bus */
+	/* Fragment 1: GT911 GPIO pin configuration */
 	fragment@1 {
+		target = <&gpio>;
+		__overlay__ {
+			gt911_pins: gt911_pins {
+				brcm,pins = <6 13>;
+				brcm,function = <0 0>; /* inputs */
+				brcm,pull = <2 2>;     /* pull-up */
+			};
+		};
+	};
+
+	/* Fragment 2: GT911 touch on DSI connector I2C bus */
+	fragment@2 {
 		target = <&DSI_I2C_NODE>;
 		__overlay__ {
 			status = "okay";
+			#address-cells = <1>;
+			#size-cells = <0>;
 
-			touch@38 {
-				compatible = "focaltech,ft6236";
-				reg = <0x38>;
-				reset-gpios = <&gpio 6 1>;  /* GPIO6, active-low */
+			touch@5d {
+				compatible = "goodix,gt911";
+				reg = <0x5d>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&gt911_pins>;
+				interrupt-parent = <&gpio>;
+				interrupts = <13 2>;       /* falling edge */
+				irq-gpios = <&gpio 13 0>;  /* GPIO13, active-high GPIO semantics */
+				reset-gpios = <&gpio 6 0>; /* GPIO6, active-high GPIO semantics */
 				touchscreen-size-x = <480>;
 				touchscreen-size-y = <640>;
+				touchscreen-inverted-x;
+				touchscreen-inverted-y;
 				status = "okay";
-				/* No interrupts - edt_ft5x06 falls back to polling */
 			};
 		};
 	};

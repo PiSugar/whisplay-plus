@@ -1,5 +1,5 @@
 #!/bin/bash
-# PiSugar 2.8" ST7701P Display + FT6336U Touch - Install Script
+# PiSugar 2.8" ST7701P Display + GT911 Touch - Install Script
 # Run on Raspberry Pi 5 with: sudo bash install.sh
 set -e
 
@@ -107,5 +107,5 @@ echo "Please reboot to activate: sudo reboot"
 echo ""
 echo "After reboot, verify with:"
 echo "  dmesg | grep -i st7701     # panel driver"
-echo "  dmesg | grep -i edt        # touch driver"
+echo "  dmesg | grep -i goodix     # touch driver"
 echo "  cat /proc/bus/input/devices # touch input device"

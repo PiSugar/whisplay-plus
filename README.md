@@ -1,6 +1,6 @@
 # PiSugar 2.8" MIPI-DSI 显示屏驱动（Raspberry Pi 5）
 
-完整的 ST7701P 面板 + FT6336U 触摸屏驱动包，包括内核模块、设备树 overlay 和自动化安装脚本。
+完整的 ST7701P 面板 + GT911 触摸屏驱动包，包括内核模块、设备树 overlay 和自动化安装脚本。
 
 ---
 
@@ -10,8 +10,8 @@
 |------|------|
 | **显示屏** | ST7701P, 480×640 pixels, MIPI-DSI 2-Lane, RGB888 |
 | **刷新率** | ~60 Hz |
-| **触摸芯片** | FT6336U, I2C 地址 0x38, 支持 2 点触控 |
-| **触摸 I2C 总线** | DSI 连接器内置 I2C（`i2c_csi_dsi1`） |
+| **触摸芯片** | GT911, I2C 地址 0x5d, 支持 5 点触控 |
+| **触摸 I2C 总线** | 与所选 DSI 端口匹配的连接器内置 I2C（`i2c_csi_dsi0/1`） |
 | **背光** | GPIO22 控制（低电平有效） |
 | **平台** | Raspberry Pi 5 (BCM2712), Kernel 6.12+ |
 
@@ -21,8 +21,8 @@
 |------|------|----------|------|
 | 面板复位 (RST) | GPIO4 | 低 | MIPI-DSI 面板复位 |
 | 背光使能 (LEDC) | GPIO22 | 低 | 背光 PWM 使能 |
-| 触摸复位 (TPRST) | GPIO6 | 低 | FT6336U 硬件复位 |
-| 触摸中断 (TPINT) | GPIO13 | — | *未连通（采用轮询模式）* |
+| 触摸复位 (TPRST) | GPIO6 | 低 | GT911 硬件复位 |
+| 触摸中断 (TPINT) | GPIO13 | 低 | GT911 触摸中断及复位时地址选择 |
 
 ---
 
@@ -72,8 +72,8 @@ sudo bash install.sh
 ```bash
 sudo reboot
 # 重启后...
-dmesg | grep -E "st7701|edt_ft5x06"
-cat /proc/bus/input/devices | grep -A3 "11-0038"
+dmesg | grep -E "st7701|Goodix"
+cat /proc/bus/input/devices | grep -A5 "Goodix"
 ```
 
 ---
@@ -162,19 +162,19 @@ dmesg | grep -i st7701
 # 预期输出：panel-st7701p-pisugar 某某: init_sequence done, display on
 
 # 查看触摸驱动日志
-dmesg | grep -i edt
-# 预期输出：edt_ft5x06 11-0038: probe success...
+dmesg | grep -i goodix
+# 预期输出中应包含：Goodix-TS 10-005d
 
 # 查看 I2C 设备
-i2cdetect -y 4
-# 预期在地址 0x38 看到触摸芯片
+ls -d /sys/bus/i2c/devices/*-005d
+# DSI0 在当前 Raspberry Pi 5 上对应 10-005d；其他端口/平台的总线号可能不同
 ```
 
 ### 查看输入设备
 
 ```bash
-cat /proc/bus/input/devices | grep -A5 "11-0038"
-# 应显示 "11-0038 EP0110M09" 的输入设备信息
+cat /proc/bus/input/devices | grep -A5 "Goodix"
+# 应显示 "Goodix Capacitive TouchScreen" 输入设备
 ```
 
 ### 实时测试触摸
@@ -227,28 +227,28 @@ options st7701p_pisugar gip_e5e8_variant=vendor
 
 ### 触摸驱动
 
-**驱动**：Linux 内核自带 `edt_ft5x06`
+**驱动**：Linux 内核自带 `goodix_ts`
 
-- Compatible：`focaltech,ft6236`
-- I2C 地址：0x38
-- 总线：`i2c_csi_dsi1`（DSI 连接器内置 I2C）
+- Compatible：`goodix,gt911`
+- I2C 地址：0x5d
+- 总线：与所选 DSI 端口匹配的 `i2c_csi_dsi0/1`（DSI 连接器内置 I2C）
 
 **特殊说明**：
-- GPIO13（触摸中断线）在此硬件上**未物理连通**
-- 驱动自动回退到**定时器轮询模式**：
-  - 轮询间隔：17ms（约 60fps）
-  - 无需配置，驱动自动启用
-  - 触摸响应延迟 < 50ms，体感流畅
+- GPIO13 同时用于 GT911 的地址选择和触摸中断。
+- `goodix_ts` 在复位期间将 GPIO13 拉低，使 GT911 使用地址 0x5d；复位完成后自动切回下降沿中断输入。
+- GPIO6/13 在 overlay 中启用上拉，INT 必须在硬件上连通，否则驱动虽可能完成探测，但不会上报触摸事件。
+- 当前面板安装方向默认同时镜像 X/Y 轴，使触控方向与显示画面一致。
+- 日志中的 `goodix_911_cfg.bin failed with error -2` 只表示没有可选的外部配置文件；驱动会继续使用芯片内置配置，不影响正常使用。
 
 **触摸校准**（如需）：
 编辑 `overlay/pisugar-st7701p-overlay.dts`：
 
 ```dts
-touch@38 {
+touch@5d {
     touchscreen-size-x = <480>;
     touchscreen-size-y = <640>;
-    touchscreen-inverted-x;    // 如需翻转 X 轴
-    touchscreen-inverted-y;    // 如需翻转 Y 轴
+    touchscreen-inverted-x;    // 默认镜像 X 轴
+    touchscreen-inverted-y;    // 默认镜像 Y 轴
     touchscreen-swapped-x-y;   // 如需交换 X/Y 轴
 };
 ```
@@ -294,7 +294,7 @@ sudo reboot
 | **启动后无显示** | DSI 排线未正确插入或驱动未加载 | 检查 DSI 排线连接；运行 `dmesg \| grep st7701` |
 | **有背光无画面** | 面板驱动加载失败 | `lsmod \| grep st7701p` 检查加载状态；查看 `dmesg` 错误 |
 | **画面花屏/闪烁** | Timing 参数不匹配 | 编辑 `st7701p_pisugar.c` 中的 mode timing 参数 |
-| **触摸完全无响应** | 触摸驱动未加载或 I2C 总线异常 | `dmesg \| grep edt` 检查；`i2cdetect -y 4` 扫描地址 0x38 |
+| **触摸完全无响应** | 触摸驱动未加载、INT 未连通或 I2C 总线异常 | `dmesg \| grep -i goodix` 检查；确认 `/sys/bus/i2c/devices/*-005d` 存在 |
 | **触摸坐标偏移** | 屏幕尺寸配置错误 | 调整 overlay 中的 `touchscreen-size-x/y` |
 | **触摸反向/倒置** | 坐标映射反向 | 在 overlay 中添加 `touchscreen-inverted-x/y` 或 `touchscreen-swapped-x-y` |
 
@@ -358,5 +358,5 @@ GPL v2
 
 问题或建议请提交 Issue。技术细节可查阅：
 - [Linux DRM Panel Driver](https://www.kernel.org/doc/html/latest/gpu/drm/index.html)
-- [EDT FT5x06 Touchscreen Driver](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/input/touchscreen/edt-ft5x06.c)
+- [Goodix Touchscreen Driver](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/input/touchscreen/goodix.c)
 - [Raspberry Pi Device Tree Documentation](https://www.raspberrypi.com/documentation/computers/device-tree.html)
