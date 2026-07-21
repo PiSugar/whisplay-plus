@@ -22,7 +22,7 @@
 | 面板复位 (RST) | GPIO4 | 低 | MIPI-DSI 面板复位 |
 | 背光使能 (LEDC) | GPIO22 | 低 | 背光 PWM 使能 |
 | 触摸复位 (TPRST) | GPIO6 | 低 | GT911 硬件复位 |
-| 触摸中断 (TPINT) | GPIO13 | 低 | GT911 触摸中断及复位时地址选择 |
+| 触摸中断 (TPINT) | GPIO13 | 低/下降沿 | GT911 触摸中断及复位时地址选择 |
 
 ---
 
@@ -232,6 +232,7 @@ options st7701p_pisugar gip_e5e8_variant=vendor
 - Compatible：`goodix,gt911`
 - I2C 地址：0x5d
 - 总线：与所选 DSI 端口匹配的 `i2c_csi_dsi0/1`（DSI 连接器内置 I2C）
+- 中断：GPIO13，下降沿触发
 
 **特殊说明**：
 - GPIO13 同时用于 GT911 的地址选择和触摸中断。
@@ -245,6 +246,8 @@ options st7701p_pisugar gip_e5e8_variant=vendor
 
 ```dts
 touch@5d {
+    interrupt-parent = <&gpio>;
+    interrupts = <13 2>;       // GPIO13, falling edge
     touchscreen-size-x = <480>;
     touchscreen-size-y = <640>;
     touchscreen-inverted-x;    // 默认镜像 X 轴

@@ -8,7 +8,7 @@
  *   GPIO4   - Panel reset   (active-low)
  *   GPIO22  - Backlight      (active-low)
  *   GPIO6   - Touch reset   (active-low)
- *   GPIO13  - Touch IRQ     (active-low)
+ *   GPIO13  - Touch IRQ     (active-low, falling-edge interrupt)
  *
  * Touch uses the in-tree Goodix driver. The driver temporarily drives the INT
  * line low during reset to select the GT911 I2C address 0x5d, then switches it
