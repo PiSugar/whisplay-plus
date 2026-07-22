@@ -1,156 +1,365 @@
-# 2.8inch DSI LCD Driver with Touchscreen
+# PiSugar 2.8" MIPI-DSI 显示屏驱动（Raspberry Pi 5）
 
-Driver for the P028TRM160-IPS-CTP 2.8" 480x640 DSI LCD panel with capacitive touch,
-based on the ST7701S display controller and FocalTech FT6236 touch controller.
+完整的 ST7701P 面板 + GT911 触摸屏驱动包，包括内核模块、设备树 overlay 和自动化安装脚本。
 
-## Hardware
+---
 
-| Signal         | Raspberry Pi Pin | GPIO   |
-| -------------- | ---------------- | ------ |
-| 3.3V           | Pin 1            |        |
-| 5V             | Pin 4            |        |
-| GND            | Pin 14           |        |
-| LEDC (BL)      | Pin 15           | GPIO22 |
-| RST (Display)  | Pin 18           | GPIO24 |
-| TPRST (Touch)  | Pin 33           | GPIO13 |
-| TPINT (Touch)  | Pin 31           | GPIO6  |
+## 📋 硬件规格
 
-- Display: MIPI DSI 1-lane, 480x640, RGB888
-- Touch: FocalTech FT6236 on DSI I2C bus (addr 0x38), 5-point multitouch
-- DSI port: DSI0 or DSI1
-- Backlight: Active-low (GPIO22 LOW = on)
+| 项目 | 规格 |
+|------|------|
+| **显示屏** | ST7701P, 480×640 pixels, MIPI-DSI 2-Lane, RGB888 |
+| **刷新率** | ~60 Hz |
+| **触摸芯片** | GT911, I2C 地址 0x5d, 支持 5 点触控 |
+| **触摸 I2C 总线** | 与所选 DSI 端口匹配的连接器内置 I2C（`i2c_csi_dsi0/1`） |
+| **背光** | GPIO22 控制（低电平有效） |
+| **平台** | Raspberry Pi 5 (BCM2712), Kernel 6.12+ |
 
-## Supported Platforms
+### GPIO 管脚映射
 
-- Raspberry Pi 5 Model B（DSI0 / DSI1 均已验证）
-- Raspberry Pi Compute Module 5（DSI0 已验证；DSI1 触摸需 CM5 IO Board J6 跳线，见 [doc/cm5-io-board-dsi1-i2c-issue.md](doc/cm5-io-board-dsi1-i2c-issue.md)）
+| 功能 | GPIO | 有效电平 | 说明 |
+|------|------|----------|------|
+| 面板复位 (RST) | GPIO4 | 低 | MIPI-DSI 面板复位 |
+| 背光使能 (LEDC) | GPIO22 | 低 | 背光 PWM 使能 |
+| 触摸复位 (TPRST) | GPIO6 | 低 | GT911 硬件复位 |
+| 触摸中断 (TPINT) | GPIO13 | 低/下降沿 | GT911 触摸中断及复位时地址选择 |
 
-## Build & Install
+---
+
+## 📁 文件结构
+
+```
+pisugar-st7701p-driver/
+├── driver/
+│   ├── st7701p_pisugar.c              # MIPI-DSI 面板驱动源码
+│   ├── Makefile                        # 内核模块编译配置
+│   └── Module.symvers                  # 编译中间产物
+├── overlay/
+│   └── pisugar-st7701p-overlay.dts    # 设备树 overlay（面板+触摸）
+├── install.sh                          # 一键安装脚本
+├── uninstall.sh                        # 卸载脚本
+├── 2.8TR+ST7701S MIPI 2Lane .txt      # ST7701P 初始化序列参考
+└── README.md                           # 本文件
+```
+
+---
+
+## ⚡ 快速开始（推荐）
+
+### 步骤 1：复制到树莓派
 
 ```bash
-# On the Raspberry Pi:
-sudo apt-get install -y raspberrypi-kernel-headers device-tree-compiler
+scp -r pisugar-st7701p-driver pi@raspberrypi.local:~/
+```
 
-cd ~/2.8inch_DSI_Driver
-chmod +x install.sh
+### 步骤 2：执行一键安装
 
-# Install for DSI0 (default)
-./install.sh
+```bash
+ssh pi@raspberrypi.local
+cd ~/pisugar-st7701p-driver
+sudo bash install.sh
+```
 
-# Or install for DSI1
-./install.sh dsi1
+脚本会自动：
+- 安装编译依赖
+- 编译面板驱动模块
+- 编译设备树 overlay
+- 配置 `/boot/firmware/config.txt`
+- 更新 initramfs
 
+### 步骤 3：重启并验证
+
+```bash
+sudo reboot
+# 重启后...
+dmesg | grep -E "st7701|Goodix"
+cat /proc/bus/input/devices | grep -A5 "Goodix"
+```
+
+---
+
+## 🔧 手动安装（可选）
+
+若需要更细粒度的控制，按以下步骤操作：
+
+### 1. 安装必要工具和内核头文件
+
+```bash
+sudo apt update
+sudo apt install -y raspberrypi-kernel-headers device-tree-compiler build-essential
+```
+
+### 2. 编译面板驱动模块
+
+```bash
+cd driver
+make clean
+make
+```
+
+输出应为 `st7701p_pisugar.ko`。安装到系统：
+
+```bash
+sudo mkdir -p /lib/modules/$(uname -r)/extra
+sudo cp st7701p_pisugar.ko /lib/modules/$(uname -r)/extra/
+sudo depmod -a
+```
+
+配置开机自动加载：
+
+```bash
+echo st7701p_pisugar | sudo tee /etc/modules-load.d/st7701p_pisugar.conf
+```
+
+### 3. 编译设备树 overlay
+
+```bash
+cd ../overlay
+
+# 使用 C 预处理器展开宏，然后编译为二进制 overlay
+cpp -nostdinc \
+    -I /usr/src/linux-headers-$(uname -r | sed 's/-v8/-common-rpi/; s/-2712/-common-rpi/')/include \
+    -undef -x assembler-with-cpp pisugar-st7701p-overlay.dts | \
+    dtc -@ -I dts -O dtb -o pisugar-st7701p.dtbo -
+
+# 安装到 overlays 目录
+sudo cp pisugar-st7701p.dtbo /boot/firmware/overlays/
+```
+
+### 4. 配置启动参数
+
+编辑 `/boot/firmware/config.txt`：
+
+```bash
+sudo nano /boot/firmware/config.txt
+```
+
+确保包含以下行（如无则追加）：
+
+```ini
+# GPU 驱动
+dtoverlay=vc4-kms-v3d
+
+# PiSugar 显示屏驱动
+dtoverlay=pisugar-st7701p
+```
+
+### 5. 重启系统
+
+```bash
 sudo reboot
 ```
 
-## DSI Port Selection
+---
 
-The display can be connected to either DSI0 or DSI1. Select the correct port
-in `/boot/firmware/config.txt`:
+## ✅ 验证安装
+
+### 检查驱动加载状态
+
+```bash
+# 查看面板驱动日志
+dmesg | grep -i st7701
+# 预期输出：panel-st7701p-pisugar 某某: init_sequence done, display on
+
+# 查看触摸驱动日志
+dmesg | grep -i goodix
+# 预期输出中应包含：Goodix-TS 10-005d
+
+# 查看 I2C 设备
+ls -d /sys/bus/i2c/devices/*-005d
+# DSI0 在当前 Raspberry Pi 5 上对应 10-005d；其他端口/平台的总线号可能不同
+```
+
+### 查看输入设备
+
+```bash
+cat /proc/bus/input/devices | grep -A5 "Goodix"
+# 应显示 "Goodix Capacitive TouchScreen" 输入设备
+```
+
+### 实时测试触摸
+
+```bash
+sudo apt install -y evtest
+sudo evtest /dev/input/event5
+# 拖动手指在屏幕上，观察坐标变化
+```
+
+---
+
+## 🔌 技术细节
+
+### 面板驱动
+
+**文件**：`driver/st7701p_pisugar.c`
+
+- 标准 Linux DRM MIPI-DSI 面板驱动框架
+- 作为外置内核模块（in-tree）编译，兼容不同内核版本
+- 初始化序列来源：`2.8TR+ST7701S MIPI 2Lane .txt`
+
+**复位时序**：
+1. GPIO4 拉低，等待 10ms（T_rtp）
+2. GPIO4 拉高，等待 20-25ms（T_ivd）
+3. 发送初始化寄存器序列
+4. 发送 Exit Sleep 命令，延迟 120ms
+5. 发送 Display On 命令
+
+**显示模式参数**：
+```
+Clock: 26.8 MHz
+Timings: 480x640 RGB888, video burst mode
+Porch: H=(30, 12, 30), V=(20, 4, 20)
+```
+
+**可调模块参数**：
+
+`st7701p_pisugar` 支持在 `/etc/modprobe.d/st7701p_pisugar.conf` 中配置显示链路和面板初始化参数，例如：
 
 ```ini
-# For DSI0 (default)
-dtoverlay=p028trm160
-
-# For DSI1
-dtoverlay=p028trm160-dsi1
+options st7701p_pisugar video_mode=burst pixel_format=rgb888 dsi_lpm=1 dsi_non_continuous_clock=1 mode_clock_khz=26800 mode_hfp=30 mode_hsync=12 mode_hbp=30 mode_vfp=20 mode_vsync=4 mode_vbp=20 gip_e5e8_variant=vendor-tail-3ca0
 ```
 
-> **Note:** Only one overlay should be active at a time. The `install.sh` script
-> handles this automatically.
+`gip_e5e8_variant` 用于选择 BK1 E5/E8 GIP/source 映射。默认 `vendor-tail-3ca0` 在保持 KDE 文字清晰度的同时减轻蓝绿斜向渐变边缘的亮点/斜亮线；如果需要回到供应商原始序列，可设为 `vendor`，然后重启验证：
 
-### DSI1 I2C Notes
-
-- **Pi 5 Model B**: DSI1 触摸即插即用，I2C bus 11，无需额外配置。
-- **CM5 IO Board**: DSI1 的 I2C 线路需要通过 **J6 跳线帽** 桥接才能连通。
-  不短接 J6 时触摸芯片无法被检测到。详见 [doc/cm5-io-board-dsi1-i2c-issue.md](doc/cm5-io-board-dsi1-i2c-issue.md)。
-
-验证 I2C 连通性：
-```bash
-# Pi 5 DSI1
-sudo i2cdetect -y 11   # 应在 0x38 看到 UU 或 38
-
-# CM5 DSI0
-sudo i2cdetect -y 10   # 应在 0x38 看到 UU 或 38
-
-# CM5 DSI1（需 J6 跳线）
-sudo i2cdetect -y 0    # 应在 0x38 看到 UU 或 38
+```ini
+options st7701p_pisugar gip_e5e8_variant=vendor
 ```
 
-## Manual Build
+### 触摸驱动
+
+**驱动**：Linux 内核自带 `goodix_ts`
+
+- Compatible：`goodix,gt911`
+- I2C 地址：0x5d
+- 总线：与所选 DSI 端口匹配的 `i2c_csi_dsi0/1`（DSI 连接器内置 I2C）
+- 中断：GPIO13，下降沿触发
+
+**特殊说明**：
+- GPIO13 同时用于 GT911 的地址选择和触摸中断。
+- `goodix_ts` 在复位期间将 GPIO13 拉低，使 GT911 使用地址 0x5d；复位完成后自动切回下降沿中断输入。
+- GPIO6/13 在 overlay 中启用上拉，INT 必须在硬件上连通，否则驱动虽可能完成探测，但不会上报触摸事件。
+- 当前面板安装方向默认同时镜像 X/Y 轴，使触控方向与显示画面一致。
+- 日志中的 `goodix_911_cfg.bin failed with error -2` 只表示没有可选的外部配置文件；驱动会继续使用芯片内置配置，不影响正常使用。
+
+**触摸校准**（如需）：
+编辑 `overlay/pisugar-st7701p-overlay.dts`：
+
+```dts
+touch@5d {
+    interrupt-parent = <&gpio>;
+    interrupts = <13 2>;       // GPIO13, falling edge
+    touchscreen-size-x = <480>;
+    touchscreen-size-y = <640>;
+    touchscreen-inverted-x;    // 默认镜像 X 轴
+    touchscreen-inverted-y;    // 默认镜像 Y 轴
+    touchscreen-swapped-x-y;   // 如需交换 X/Y 轴
+};
+```
+
+---
+
+## 🗑️ 卸载
+
+### 一键卸载
 
 ```bash
-# Build kernel module
-make
+sudo bash uninstall.sh
+sudo reboot
+```
 
-# Compile device tree overlay (choose one)
-dtc -@ -H epapr -I dts -O dtb -o p028trm160.dtbo p028trm160-overlay.dts          # DSI0
-dtc -@ -H epapr -I dts -O dtb -o p028trm160-dsi1.dtbo p028trm160-dsi1-overlay.dts # DSI1
+### 手动卸载
 
-# Install
-sudo cp panel-p028trm160.ko /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/panel/
+```bash
+# 移除模块
+sudo rmmod st7701p_pisugar
+rm -f /lib/modules/$(uname -r)/extra/st7701p_pisugar.ko
+rm -f /etc/modules-load.d/st7701p_pisugar.conf
+
+# 移除 overlay
+sudo rm -f /boot/firmware/overlays/pisugar-st7701p.dtbo
+
+# 编辑 config.txt 移除相关行
+sudo nano /boot/firmware/config.txt
+# 删除：dtoverlay=pisugar-st7701p
+
+# 更新并重启
 sudo depmod -a
-sudo cp p028trm160*.dtbo /boot/firmware/overlays/
-
-# Add to /boot/firmware/config.txt (choose one):
-#   dtoverlay=p028trm160        # DSI0
-#   dtoverlay=p028trm160-dsi1   # DSI1
+sudo update-initramfs -u
+sudo reboot
 ```
 
-## Overlay Parameters
+---
 
-| Parameter       | Description                           |
-| --------------- | ------------------------------------- |
-| `sizex`         | Touch X resolution (default 240)      |
-| `sizey`         | Touch Y resolution (default 320)      |
-| `disable_touch` | Set to disable the touch controller   |
-| `lanes`         | DSI lanes: 1 (default) or 2           |
+## 🐛 常见问题排查
 
-## Touch Mode
+| 现象 | 根本原因 | 解决方案 |
+|------|----------|---------|
+| **启动后无显示** | DSI 排线未正确插入或驱动未加载 | 检查 DSI 排线连接；运行 `dmesg \| grep st7701` |
+| **有背光无画面** | 面板驱动加载失败 | `lsmod \| grep st7701p` 检查加载状态；查看 `dmesg` 错误 |
+| **画面花屏/闪烁** | Timing 参数不匹配 | 编辑 `st7701p_pisugar.c` 中的 mode timing 参数 |
+| **触摸完全无响应** | 触摸驱动未加载、INT 未连通或 I2C 总线异常 | `dmesg \| grep -i goodix` 检查；确认 `/sys/bus/i2c/devices/*-005d` 存在 |
+| **触摸坐标偏移** | 屏幕尺寸配置错误 | 调整 overlay 中的 `touchscreen-size-x/y` |
+| **触摸反向/倒置** | 坐标映射反向 | 在 overlay 中添加 `touchscreen-inverted-x/y` 或 `touchscreen-swapped-x-y` |
 
-The touch panel has two operating modes controlled by the labwc compositor:
+---
 
-| Mode | Behavior | Use Case |
-| ---- | -------- | -------- |
-| **Native touch** | Swipe to scroll, tap to click | Web browsing, document reading |
-| **Mouse emulation** | Touch acts as mouse cursor, drag to select | Text selection, precise control |
+## 📝 配置文件速查
 
-Toggle between modes:
+### `/boot/firmware/config.txt` 示例完整配置
 
-```bash
-# Toggle (switches to the other mode)
-./toggle-touch-mode.sh
+```ini
+[pi5]
+# GPU 显示驱动
+dtoverlay=vc4-kms-v3d
 
-# Switch to specific mode
-./toggle-touch-mode.sh touch   # swipe = scroll
-./toggle-touch-mode.sh mouse   # drag = select
+# PiSugar 2.8" 显示屏 + 触摸
+dtoverlay=pisugar-st7701p
+
+# 可选：DWC2 USB OTG（如使用）
+# dtoverlay=dwc2,dr_mode=host
 ```
 
-The script modifies `~/.config/labwc/rc.xml` and hot-reloads labwc — no reboot needed.
+---
 
-## Architecture Notes
+## 📖 进阶开发
 
-The panel driver splits initialization into two stages due to the Raspberry Pi
-RP1 DSI bridge driver's enable ordering:
+### 修改初始化序列
 
-- **prepare()**: GPIO reset sequence only (runs before DSI PHY is configured)
-- **enable()**: ST7701S init commands, sleep out, display on, backlight
-  (runs after DSI host PHY is fully initialized and active)
+编辑 `driver/st7701p_pisugar.c`，函数 `st7701p_init_sequence()`。参考 `2.8TR+ST7701S MIPI 2Lane .txt`。
 
-This is necessary because the `drm-rp1-dsi` bridge driver configures the DSI
-PHY in its `bridge.pre_enable` callback, which executes *after* the panel's
-`prepare()` in the DRM bridge chain pre-enable (reverse) ordering.
+### 修改显示模式参数
 
-## Files
+在 `st7701p_get_modes()` 中调整：
 
-- `panel-p028trm160.c` — Kernel panel driver module (ST7701S init sequence)
-- `p028trm160-overlay.dts` — Device tree overlay for DSI0
-- `p028trm160-dsi1-overlay.dts` — Device tree overlay for DSI1
-- `Makefile` — Kernel module build
-- `install.sh` — Automated build & install script
-- `toggle-touch-mode.sh` — Toggle touch between native touch and mouse emulation
-- `doc/` — Hardware documentation and datasheets
+```c
+static const struct drm_display_mode mode = {
+    .clock = 26800,        // 像素时钟 MHz * 100
+    .hdisplay = 480,
+    .hsync_start = 510,
+    .hsync_end = 522,
+    .htotal = 552,
+    .vdisplay = 640,
+    .vsync_start = 660,
+    .vsync_end = 664,
+    .vtotal = 684,
+};
+```
 
+### 构建为内置驱动
 
+若需要集成到内核源码树（不作为外置模块），参考 Linux 驱动开发指南。
 
+---
 
+## 📄 许可证
+
+GPL v2
+
+---
+
+## 📞 支持
+
+问题或建议请提交 Issue。技术细节可查阅：
+- [Linux DRM Panel Driver](https://www.kernel.org/doc/html/latest/gpu/drm/index.html)
+- [Goodix Touchscreen Driver](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/input/touchscreen/goodix.c)
+- [Raspberry Pi Device Tree Documentation](https://www.raspberrypi.com/documentation/computers/device-tree.html)
