@@ -36,15 +36,17 @@ class GpioHardware:
         self.button = self._request_input(BOARD_TO_BCM[self.BUTTON_PIN])
         self.button_pressed = False
         self.last_button_change = 0.0
+        self.last_rgb = (0, 0, 0)
+        self.set_rgb(0, 0, 0)
 
     def _request_output(self, offset: int):
         if self.v2:
             from gpiod.line import Direction, Value
 
-            settings = self.gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE)
+            settings = self.gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE)
             return self.chip.request_lines(consumer="whisplay-hat-plus-demo", config={offset: settings}), offset
         line = self.chip.get_line(offset)
-        line.request(consumer="whisplay-hat-plus-demo", type=self.gpiod.LINE_REQ_DIR_OUT, default_val=0)
+        line.request(consumer="whisplay-hat-plus-demo", type=self.gpiod.LINE_REQ_DIR_OUT, default_val=1)
         return line, None
 
     def _request_input(self, offset: int):
@@ -82,9 +84,10 @@ class GpioHardware:
         return 1 if obj.get_value(offset) == Value.ACTIVE else 0
 
     def set_rgb(self, r: int, g: int, b: int) -> None:
-        self._set(self.lines[self.RED_PIN], 1 if r else 0)
-        self._set(self.lines[self.GREEN_PIN], 1 if g else 0)
-        self._set(self.lines[self.BLUE_PIN], 1 if b else 0)
+        self.last_rgb = (r, g, b)
+        self._set(self.lines[self.RED_PIN], 0 if r else 1)
+        self._set(self.lines[self.GREEN_PIN], 0 if g else 1)
+        self._set(self.lines[self.BLUE_PIN], 0 if b else 1)
 
     def poll_button(self) -> bool:
         pressed = bool(self._get(self.button))

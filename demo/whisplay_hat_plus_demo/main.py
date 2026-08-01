@@ -10,6 +10,8 @@ import time
 
 os.environ.setdefault("SDL_ENABLE_SCREEN_KEYBOARD", "0")
 os.environ.setdefault("SDL_IME_SHOW_UI", "0")
+os.environ.setdefault("SDL_TOUCH_MOUSE_EVENTS", "0")
+os.environ.setdefault("SDL_MOUSE_TOUCH_EVENTS", "0")
 
 import pygame
 
@@ -69,8 +71,12 @@ class HatPlusDemo:
 
         self.running = True
         self.status = "Ready"
-        self.touch_points: list[tuple[int, int, float]] = []
+        self.active_touches: dict[int, tuple[int, int, float]] = {}
+        self.touch_points: list[tuple[int, int, float, int]] = []
+        self.last_finger_event_at = 0.0
         self.buttons = []
+        self.pressed_button = ""
+        self.button_flash_until = 0.0
 
         self.bus = None
         self.qmi = None
@@ -94,7 +100,18 @@ class HatPlusDemo:
         self.gpio = None
         self.gpio_error = ""
         self.led_index = 0
-        self.led_colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 180, 0), (0, 0, 0)]
+        self.button_test_active = False
+        self.button_test_count = 0
+        self.last_button_state = False
+        self.last_button_event = "none"
+        self.last_button_event_at = 0.0
+        self.led_colors = [
+            ("Red", (255, 0, 0)),
+            ("Green", (0, 255, 0)),
+            ("Blue", (0, 0, 255)),
+            ("White", (255, 255, 255)),
+            ("Off", (0, 0, 0)),
+        ]
 
         self.source = ""
         self.source_label = ""
@@ -131,12 +148,13 @@ class HatPlusDemo:
         margin = 14
         gap = 8
         h = 34
-        w = max(72, (self.width - margin * 2 - gap * 4) // 5)
+        w = max(52, (self.width - margin * 2 - gap * 5) // 6)
         y = self.height - margin - h
         actions = [
             ("Tone", self.play_tone),
             ("Record", self.record_audio),
             ("LED", self.cycle_led),
+            ("Btn", self.start_button_test),
             ("Cal", self.toggle_calibration),
             ("Quit", self.quit),
         ]
@@ -162,21 +180,37 @@ class HatPlusDemo:
 
     def _record_worker(self) -> None:
         try:
-            path = audio.record(self.source, 4.0)
+            path = audio.record_with_peak(self.source, 4.0, self.set_record_peak)
             self.record_peak = audio.wav_peak(path)
-            self.status = f"Recording peak {int(self.record_peak * 100)}%"
+            audio.set_100_percent(self.source, self.sink)
+            self.stop_player()
+            cmd = ["paplay", f"--device={self.sink}", str(path)] if self.sink else ["paplay", str(path)]
+            self.player = subprocess.Popen(cmd)
+            self.status = f"Recording peak {int(self.record_peak * 100)}%, playing back"
         except Exception as exc:
             self.status = f"Record failed: {exc}"
         finally:
             self.recording = False
+
+    def set_record_peak(self, peak: float) -> None:
+        self.record_peak = max(0.0, min(1.0, peak))
 
     def cycle_led(self) -> None:
         if not self.gpio:
             self.status = f"LED unavailable: {self.fit(self.gpio_error, 40)}"
             return
         self.led_index = (self.led_index + 1) % len(self.led_colors)
-        self.gpio.set_rgb(*self.led_colors[self.led_index])
-        self.status = f"LED RGB {self.led_colors[self.led_index]}"
+        name, rgb = self.led_colors[self.led_index]
+        self.gpio.set_rgb(*rgb)
+        self.status = f"LED {name} RGB {rgb}"
+
+    def start_button_test(self) -> None:
+        self.button_test_active = True
+        self.button_test_count = 0
+        self.last_button_state = self.gpio.poll_button() if self.gpio else False
+        self.last_button_event = "waiting"
+        self.last_button_event_at = time.monotonic()
+        self.status = "Button test: press the hardware button"
 
     def toggle_calibration(self) -> None:
         if self.calibrating:
@@ -232,27 +266,82 @@ class HatPlusDemo:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
+                elif event.type == pygame.FINGERDOWN:
+                    self.last_finger_event_at = time.monotonic()
+                    pos = self.finger_pos(event)
+                    self.active_touches[event.finger_id] = (*pos, time.monotonic())
+                    self.touch_points.append((*pos, time.monotonic(), len(self.active_touches) % 6))
+                    self.press_button_at(pos)
+                elif event.type == pygame.FINGERMOTION:
+                    self.last_finger_event_at = time.monotonic()
+                    pos = self.finger_pos(event)
+                    self.active_touches[event.finger_id] = (*pos, time.monotonic())
+                    self.touch_points.append((*pos, time.monotonic(), len(self.active_touches) % 6))
+                elif event.type == pygame.FINGERUP:
+                    self.last_finger_event_at = time.monotonic()
+                    self.active_touches.pop(event.finger_id, None)
+                    self.pressed_button = ""
                 elif event.type == pygame.KEYDOWN:
                     if event.key in (pygame.K_ESCAPE, pygame.K_q):
                         self.running = False
                     elif event.key in (pygame.K_c, pygame.K_SPACE):
                         self.toggle_calibration()
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    self.touch_points.append((event.pos[0], event.pos[1], time.monotonic()))
-                    for _, rect, action in self.buttons:
-                        if rect.collidepoint(event.pos):
-                            action()
-                            break
+                    if self.ignore_synthetic_mouse():
+                        continue
+                    self.active_touches[-1] = (event.pos[0], event.pos[1], time.monotonic())
+                    self.touch_points.append((event.pos[0], event.pos[1], time.monotonic(), 0))
+                    self.press_button_at(event.pos)
+                elif event.type == pygame.MOUSEMOTION and event.buttons[0]:
+                    if self.ignore_synthetic_mouse():
+                        continue
+                    self.active_touches[-1] = (event.pos[0], event.pos[1], time.monotonic())
+                    self.touch_points.append((event.pos[0], event.pos[1], time.monotonic(), 0))
+                elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                    if self.ignore_synthetic_mouse():
+                        continue
+                    self.active_touches.pop(-1, None)
+                    self.pressed_button = ""
             self.width, self.height = self.screen.get_size()
             self.buttons = self.layout_buttons()
             imu = self.read_imu()
             mag = self.read_mag()
             button_pressed = self.gpio.poll_button() if self.gpio else False
+            self.update_button_test(button_pressed)
             self.draw(imu, mag, button_pressed)
             pygame.display.flip()
             self.clock.tick(30)
         self.close()
         return 0
+
+    def update_button_test(self, pressed: bool) -> None:
+        if not self.button_test_active:
+            self.last_button_state = pressed
+            return
+        if pressed == self.last_button_state:
+            return
+        self.last_button_state = pressed
+        self.last_button_event_at = time.monotonic()
+        if pressed:
+            self.button_test_count += 1
+            self.last_button_event = "pressed"
+            self.status = f"Button press detected #{self.button_test_count}"
+        else:
+            self.last_button_event = "released"
+
+    def finger_pos(self, event) -> tuple[int, int]:
+        return round(event.x * self.width), round(event.y * self.height)
+
+    def ignore_synthetic_mouse(self) -> bool:
+        return time.monotonic() - self.last_finger_event_at < 0.35
+
+    def press_button_at(self, pos) -> None:
+        for label, rect, action in self.buttons:
+            if rect.collidepoint(pos):
+                self.pressed_button = label
+                self.button_flash_until = time.monotonic() + 0.18
+                action()
+                break
 
     def read_imu(self):
         if not self.qmi:
@@ -313,15 +402,26 @@ class HatPlusDemo:
 
         now = time.monotonic()
         self.touch_points = [p for p in self.touch_points if now - p[2] < 1.5]
-        for x, y, ts in self.touch_points:
+        palette = [YELLOW, BLUE, GREEN, RED, (207, 139, 255), (255, 154, 102)]
+        for x, y, ts, color_index in self.touch_points[-80:]:
             alpha = max(0.2, 1.0 - (now - ts) / 1.5)
-            pygame.draw.circle(self.screen, YELLOW, (x, y), int(18 * alpha), 2)
+            pygame.draw.circle(self.screen, palette[color_index % len(palette)], (x, y), int(14 * alpha), 2)
+        for index, (touch_id, (x, y, _)) in enumerate(list(self.active_touches.items())[:5], start=1):
+            color = palette[index % len(palette)]
+            pygame.draw.circle(self.screen, color, (x, y), 22, 3)
+            self.center(str(index), (x, y), self.body_font, color)
 
         for label, rect, _ in self.buttons:
             display = "Finish" if label == "Cal" and self.calibrating else label
-            color = GREEN if label in ("Tone", "Record", "Cal") else PANEL_2
+            color = GREEN if label in ("Tone", "Record", "Btn", "Cal") else PANEL_2
             if label == "Quit":
                 color = (80, 50, 55)
+            pressed = label == self.pressed_button or (label == self.pressed_button and time.monotonic() < self.button_flash_until)
+            if pressed:
+                color = tuple(min(255, c + 38) for c in color)
+                rect = rect.inflate(-4, -4)
+            elif label == self.pressed_button and time.monotonic() >= self.button_flash_until:
+                self.pressed_button = ""
             pygame.draw.rect(self.screen, color, rect, border_radius=8)
             pygame.draw.rect(self.screen, LINE, rect, 1, border_radius=8)
             self.center(display, rect.center, self.body_font, TEXT)
@@ -330,20 +430,32 @@ class HatPlusDemo:
         self.panel(x, y, w, h)
         self.text("Display / Touch", x + 12, y + 10, self.body_font, GREEN)
         self.text(f"{self.width}x{self.height} fullscreen", x + 12, y + 38, self.small_font, TEXT)
-        self.text(f"touch points {len(self.touch_points)}", x + 12, y + 62, self.small_font, MUTED)
+        self.text(f"active {len(self.active_touches)}/5  trail {len(self.touch_points)}", x + 12, y + 62, self.small_font, MUTED)
 
     def draw_audio_panel(self, x, y, w, h) -> None:
         self.panel(x, y, w, h)
         self.text("Sound", x + 12, y + 10, self.body_font, GREEN if self.source and self.sink else RED)
-        self.text(self.fit(self.sink_label, 24), x + 12, y + 38, self.small_font, TEXT)
-        tail = "recording" if self.recording else f"mic peak {int(self.record_peak * 100)}%"
-        self.text(tail, x + 12, y + 62, self.small_font, MUTED)
+        self.text(self.fit(self.sink_label, 22), x + 12, y + 34, self.small_font, TEXT)
+        self.draw_level_bar(x + 12, y + 57, w - 24, 14, self.record_peak, active=self.recording)
+        label = "live mic" if self.recording else f"mic peak {int(self.record_peak * 100)}%"
+        self.text(label, x + 12, y + 74, self.small_font, MUTED)
 
     def draw_gpio_panel(self, x, y, w, h, pressed: bool) -> None:
         self.panel(x, y, w, h)
         self.text("LED / Button", x + 12, y + 10, self.body_font, GREEN if self.gpio else RED)
-        self.text("button pressed" if pressed else "button released", x + 12, y + 38, self.small_font, TEXT)
-        self.text(self.fit(self.gpio_error, 26) if self.gpio_error else "RGB cycle ready", x + 12, y + 62, self.small_font, MUTED)
+        state = "button pressed" if pressed else "button released"
+        self.text(state, x + 12, y + 34, self.small_font, TEXT)
+        if self.gpio_error:
+            detail = self.fit(self.gpio_error, 26)
+        elif self.button_test_active:
+            age = time.monotonic() - self.last_button_event_at
+            detail = f"test {self.button_test_count} {self.last_button_event} {age:.1f}s"
+        else:
+            detail = f"RGB {self.gpio.last_rgb if self.gpio else (0, 0, 0)}"
+        self.text(detail, x + 12, y + 58, self.small_font, MUTED)
+        led_rgb = self.gpio.last_rgb if self.gpio else (0, 0, 0)
+        pygame.draw.circle(self.screen, led_rgb, (x + w - 34, y + 48), 22)
+        pygame.draw.circle(self.screen, LINE, (x + w - 34, y + 48), 22, 2)
 
     def draw_imu_panel(self, x, y, w, h, imu) -> None:
         self.panel(x, y, w, h)
@@ -353,6 +465,7 @@ class HatPlusDemo:
             total = math.sqrt(ax * ax + ay * ay + az * az)
             self.text(f"acc {total:.2f}g  temp {temp:.1f}C", x + 12, y + 38, self.small_font, TEXT)
             self.text(f"gyro {gx:+.1f} {gy:+.1f} {gz:+.1f}", x + 12, y + 62, self.small_font, MUTED)
+            self.draw_orientation_cube((ax, ay, az), (x + w - 48, y + 50), 36)
         else:
             self.text(self.fit(self.imu_error, 26), x + 12, y + 38, self.small_font, MUTED)
 
@@ -383,6 +496,43 @@ class HatPlusDemo:
         end = (center[0] + math.cos(rad) * (radius - 6), center[1] + math.sin(rad) * (radius - 6))
         pygame.draw.line(self.screen, RED, center, end, 4)
         pygame.draw.circle(self.screen, RED, end, 5)
+
+    def draw_level_bar(self, x: int, y: int, w: int, h: int, value: float, active: bool) -> None:
+        value = max(0.0, min(1.0, value))
+        pygame.draw.rect(self.screen, (18, 23, 30), (x, y, w, h), border_radius=5)
+        pygame.draw.rect(self.screen, LINE, (x, y, w, h), 1, border_radius=5)
+        fill = GREEN if active else BLUE
+        pygame.draw.rect(self.screen, fill, (x + 2, y + 2, max(0, int((w - 4) * value)), h - 4), border_radius=4)
+        for frac in (0.25, 0.5, 0.75):
+            px = x + int(w * frac)
+            pygame.draw.line(self.screen, LINE, (px, y + 2), (px, y + h - 3), 1)
+
+    def draw_orientation_cube(self, accel: tuple[float, float, float], center, size: int) -> None:
+        ax, ay, az = accel
+        roll = math.atan2(ay, az if abs(az) > 0.001 else 0.001)
+        pitch = math.atan2(-ax, math.sqrt(ay * ay + az * az))
+        yaw = 0.35
+        vertices = [
+            (-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1),
+            (-1, -1, 1), (1, -1, 1), (1, 1, 1), (-1, 1, 1),
+        ]
+        points = []
+        for x, y, z in vertices:
+            cy, sy = math.cos(yaw), math.sin(yaw)
+            x, z = x * cy + z * sy, -x * sy + z * cy
+            cp, sp = math.cos(pitch), math.sin(pitch)
+            y, z = y * cp - z * sp, y * sp + z * cp
+            cr, sr = math.cos(roll), math.sin(roll)
+            x, y = x * cr - y * sr, x * sr + y * cr
+            depth = 3.6 + z
+            scale = size / depth
+            points.append((round(center[0] + x * scale), round(center[1] + y * scale)))
+        front = [points[i] for i in (4, 5, 6, 7)]
+        pygame.draw.polygon(self.screen, (34, 48, 64), front)
+        for a, b in ((0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)):
+            pygame.draw.line(self.screen, LINE, points[a], points[b], 2)
+        pygame.draw.line(self.screen, GREEN, points[4], points[5], 3)
+        pygame.draw.line(self.screen, BLUE, points[4], points[7], 3)
 
     def panel(self, x: int, y: int, w: int, h: int) -> None:
         pygame.draw.rect(self.screen, PANEL, (x, y, w, h), border_radius=8)

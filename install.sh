@@ -32,7 +32,6 @@ if ! apt-get install -y \
     libasound2-plugins \
     pipewire-pulse \
     pulseaudio-utils \
-    python3-gpiod \
     python3-pygame \
     python3-smbus \
     sox; then
@@ -44,7 +43,6 @@ if ! apt-get install -y \
         libasound2-plugins \
         pipewire-pulse \
         pulseaudio-utils \
-        python3-gpiod \
         python3-pygame \
         python3-smbus \
         sox \
@@ -56,13 +54,15 @@ if ! apt-get install -y \
         libasound2-plugins \
         pipewire-pulse \
         pulseaudio-utils \
-        python3-gpiod \
         python3-pygame \
         python3-smbus \
         sox \
         linux-headers-rpi-2712 \
         linux-headers-rpi-v8
 fi
+apt-get install -y python3-libgpiod 2>/dev/null || \
+apt-get install -y python3-gpiod 2>/dev/null || \
+echo "  WARN: python gpiod binding not installed; LED/button demo may need python3-libgpiod."
 
 # 2. Build kernel module
 echo "[2/6] Building display and sound kernel modules..."

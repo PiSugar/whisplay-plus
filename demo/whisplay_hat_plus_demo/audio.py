@@ -106,6 +106,44 @@ def record(source: str, seconds: float = 4.0):
     return RECORDING
 
 
+def record_with_peak(source: str, seconds: float, on_peak) -> Path:
+    if RECORDING.exists():
+        RECORDING.unlink()
+    cmd = ["parecord", f"--device={source}", "--file-format=wav", str(RECORDING)]
+    if not source:
+        cmd.pop(1)
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    started = time.monotonic()
+    try:
+        while time.monotonic() - started < seconds:
+            on_peak(raw_file_peak(RECORDING))
+            time.sleep(0.08)
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    on_peak(raw_file_peak(RECORDING))
+    return RECORDING
+
+
+def raw_file_peak(path: Path = RECORDING) -> float:
+    try:
+        if not path.exists() or path.stat().st_size <= 4096:
+            return 0.0
+        with path.open("rb") as fh:
+            fh.seek(max(44, path.stat().st_size - 8192))
+            data = fh.read()
+        data = data[: len(data) - (len(data) % 2)]
+        if not data:
+            return 0.0
+        samples = struct.unpack("<" + "h" * (len(data) // 2), data)
+        return min(1.0, max(abs(v) for v in samples) / 32768.0)
+    except Exception:
+        return 0.0
+
+
 def wav_peak(path: Path = RECORDING) -> float:
     if not path.exists() or path.stat().st_size <= 44:
         return 0.0
