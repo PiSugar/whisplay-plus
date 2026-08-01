@@ -1,0 +1,27 @@
+/*
+ * Whisplay Hat+ sensor overlay fragments.
+ *
+ * The demo accesses QMI8658B/QMC6309 from user space, but the nodes document
+ * the fixed I2C1 addresses and allow future kernel drivers to bind.
+ */
+
+fragment@10 {
+	target = <&i2c1>;
+	__overlay__ {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		qmi8658b@6b {
+			compatible = "qst,qmi8658b";
+			reg = <0x6b>;
+			status = "okay";
+		};
+
+		qmc6309@7c {
+			compatible = "qst,qmc6309";
+			reg = <0x7c>;
+			status = "okay";
+		};
+	};
+};
