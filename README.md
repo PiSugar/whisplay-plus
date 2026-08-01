@@ -43,7 +43,7 @@ uninstall.sh                    Uninstaller
 Run on Raspberry Pi OS Desktop:
 
 ```bash
-cd ~/2.8inch_DSI_Driver
+cd ~/whisplay-plus
 sudo bash install.sh
 sudo reboot
 ```
