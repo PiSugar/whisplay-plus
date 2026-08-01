@@ -1,95 +1,123 @@
 #!/bin/bash
-# PiSugar 2.8" ST7701P Display + GT911 Touch - Install Script
+# Whisplay Hat+ Driver Installer
 # Run on Raspberry Pi 5 with: sudo bash install.sh
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-OVERLAY_NAME="pisugar-st7701p"
-MODULE_NAME="st7701p_pisugar"
+HAT_OVERLAY="whisplay-plus"
+DISPLAY_MODULE="st7701p_pisugar"
+SOUND_MODULE="snd-soc-whisplay-soundcard"
 CONFIG="/boot/firmware/config.txt"
 MODEL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null || true)"
-DSI_PORT=0
 
-echo "=== PiSugar ST7701P Display Driver Installer ==="
+echo "=== Whisplay Hat+ Driver Installer ==="
 
-# On Pi 5 / CM5, allow user to choose DSI0 or DSI1 at install time.
+# Whisplay Hat+ defaults to DSI0. If HAT EEPROM auto-loads this overlay and
+# the display is connected to DSI1, add this before other overlays in config.txt:
+#   dtparam=display_dsi=1
 if echo "$MODEL" | grep -Eq "Raspberry Pi 5|Compute Module 5"; then
     echo "Detected platform: $MODEL"
-    if [ -t 0 ]; then
-        while true; do
-            read -r -p "Select DSI port [0/1] (default: 0): " DSI_INPUT
-            DSI_INPUT="${DSI_INPUT:-0}"
-            case "$DSI_INPUT" in
-                0|1)
-                    DSI_PORT="$DSI_INPUT"
-                    break
-                    ;;
-                *)
-                    echo "  Invalid input. Please enter 0 or 1."
-                    ;;
-            esac
-        done
-    else
-        echo "Non-interactive shell detected, defaulting to DSI0."
-    fi
 fi
 
-echo "Using DSI${DSI_PORT} for display/touch overlay build."
+echo "Display/touch overlay default: DSI0. Use dtparam=display_dsi=1 for DSI1."
 
 # 1. Install build dependencies
 echo "[1/6] Installing build dependencies..."
 apt-get update -qq
-if ! apt-get install -y raspberrypi-kernel-headers device-tree-compiler; then
+if ! apt-get install -y \
+    build-essential \
+    raspberrypi-kernel-headers \
+    device-tree-compiler \
+    alsa-utils \
+    libasound2-plugins \
+    pipewire-pulse \
+    pulseaudio-utils \
+    python3-gpiod \
+    python3-pygame \
+    python3-smbus \
+    sox; then
     echo "  raspberrypi-kernel-headers not available, trying linux-headers fallback..."
     apt-get install -y \
+        build-essential \
         device-tree-compiler \
+        alsa-utils \
+        libasound2-plugins \
+        pipewire-pulse \
+        pulseaudio-utils \
+        python3-gpiod \
+        python3-pygame \
+        python3-smbus \
+        sox \
         "linux-headers-$(uname -r)" || \
     apt-get install -y \
+        build-essential \
         device-tree-compiler \
+        alsa-utils \
+        libasound2-plugins \
+        pipewire-pulse \
+        pulseaudio-utils \
+        python3-gpiod \
+        python3-pygame \
+        python3-smbus \
+        sox \
         linux-headers-rpi-2712 \
         linux-headers-rpi-v8
 fi
 
 # 2. Build kernel module
-echo "[2/6] Building panel driver module..."
-cd "$SCRIPT_DIR/driver"
+echo "[2/6] Building display and sound kernel modules..."
+cd "$SCRIPT_DIR/display/driver"
 make clean
 make
-cp ${MODULE_NAME}.ko /lib/modules/$(uname -r)/extra/ 2>/dev/null || {
-    mkdir -p /lib/modules/$(uname -r)/extra/
-    cp ${MODULE_NAME}.ko /lib/modules/$(uname -r)/extra/
-}
+cd "$SCRIPT_DIR/sound"
+make clean
+make
+mkdir -p /lib/modules/$(uname -r)/extra/
+cp "$SCRIPT_DIR/display/driver/${DISPLAY_MODULE}.ko" /lib/modules/$(uname -r)/extra/
+cp "$SCRIPT_DIR/sound/${SOUND_MODULE}.ko" /lib/modules/$(uname -r)/extra/
 depmod -a
 
 # 3. Set up auto-load
 echo "[3/6] Configuring module auto-load..."
-echo "$MODULE_NAME" > /etc/modules-load.d/${MODULE_NAME}.conf
+cat > /etc/modules-load.d/whisplay-hat-plus.conf <<EOF
+${DISPLAY_MODULE}
+${SOUND_MODULE}
+EOF
 
 # 4. Compile and install device tree overlay
-echo "[4/6] Building and installing device tree overlay..."
+echo "[4/6] Building and installing aggregate device tree overlay..."
 cd "$SCRIPT_DIR/overlay"
 cpp -nostdinc -I /usr/src/linux-headers-$(uname -r | sed 's/-v8.*/-common-rpi/;s/-2712.*/-common-rpi/')/include \
-    -undef -x assembler-with-cpp -DDSI_PORT=${DSI_PORT} ${OVERLAY_NAME}-overlay.dts | \
-    dtc -@ -I dts -O dtb -o ${OVERLAY_NAME}.dtbo - 2>/dev/null || \
+    -undef -x assembler-with-cpp ${HAT_OVERLAY}.dts | \
+    dtc -@ -I dts -O dtb -o ${HAT_OVERLAY}.dtbo - 2>/dev/null || \
 cpp -nostdinc -I /usr/src/linux-headers-*-common-rpi/include \
-    -undef -x assembler-with-cpp -DDSI_PORT=${DSI_PORT} ${OVERLAY_NAME}-overlay.dts | \
-    dtc -@ -I dts -O dtb -o ${OVERLAY_NAME}.dtbo -
-cp ${OVERLAY_NAME}.dtbo /boot/firmware/overlays/
+    -undef -x assembler-with-cpp ${HAT_OVERLAY}.dts | \
+    dtc -@ -I dts -O dtb -o ${HAT_OVERLAY}.dtbo -
+cp ${HAT_OVERLAY}.dtbo /boot/firmware/overlays/
 
 # 5. Configure config.txt
 echo "[5/6] Configuring boot parameters..."
-if ! grep -q "^dtoverlay=${OVERLAY_NAME}" "$CONFIG"; then
-    # Add overlay after [all] section if it exists, otherwise append
-    if grep -q "^\[all\]" "$CONFIG"; then
-        sed -i "/^\[all\]/a dtoverlay=${OVERLAY_NAME}" "$CONFIG"
-    else
-        echo "" >> "$CONFIG"
-        echo "dtoverlay=${OVERLAY_NAME}" >> "$CONFIG"
+for param in i2c_arm=on i2s=on spi=on; do
+    if ! grep -q "^dtparam=${param}" "$CONFIG"; then
+        echo "dtparam=${param}" >> "$CONFIG"
     fi
-    echo "  Added dtoverlay=${OVERLAY_NAME} to config.txt"
+done
+
+if ! grep -q "^dtoverlay=${HAT_OVERLAY}" "$CONFIG"; then
+    if grep -q "^\[all\]" "$CONFIG"; then
+        sed -i "/^\[all\]/a dtoverlay=${HAT_OVERLAY}" "$CONFIG"
+    else
+        echo "dtoverlay=${HAT_OVERLAY}" >> "$CONFIG"
+    fi
+    echo "  Added dtoverlay=${HAT_OVERLAY} to config.txt"
 else
-    echo "  dtoverlay=${OVERLAY_NAME} already in config.txt"
+    echo "  dtoverlay=${HAT_OVERLAY} already in config.txt"
 fi
+
+sed -i '/^dtoverlay=pisugar-st7701p/d' "$CONFIG" 2>/dev/null || true
+sed -i '/^dtoverlay=whisplay-soundcard/d' "$CONFIG" 2>/dev/null || true
+sed -i '/^dtoverlay=wm8960-soundcard/d' "$CONFIG" 2>/dev/null || true
+sed -i '/^dtoverlay=es8389-soundcard/d' "$CONFIG" 2>/dev/null || true
 
 # Ensure vc4-kms-v3d is enabled
 if ! grep -q "^dtoverlay=vc4-kms-v3d" "$CONFIG"; then
@@ -97,8 +125,27 @@ if ! grep -q "^dtoverlay=vc4-kms-v3d" "$CONFIG"; then
     echo "  You may need to add it manually for display to work"
 fi
 
-# 6. Update initramfs
-echo "[6/6] Updating initramfs..."
+# 6. Install demo and update initramfs
+echo "[6/6] Installing desktop demo and updating initramfs..."
+rm -rf /opt/whisplay-hat-plus
+mkdir -p /opt/whisplay-hat-plus
+cp -a "$SCRIPT_DIR/demo" /opt/whisplay-hat-plus/
+cp -a "$SCRIPT_DIR/sensors" /opt/whisplay-hat-plus/
+chmod +x /opt/whisplay-hat-plus/demo/run-whisplay-hat-plus-demo.sh
+install -m 644 "$SCRIPT_DIR/demo/whisplay-hat-plus-demo.desktop" /usr/share/applications/
+
+cat > /etc/asound.conf <<'EOF'
+pcm.!default {
+    type plug
+    slave.pcm "whisplaysound"
+}
+
+ctl.!default {
+    type hw
+    card whisplaysound
+}
+EOF
+
 update-initramfs -u
 
 echo ""
@@ -108,4 +155,7 @@ echo ""
 echo "After reboot, verify with:"
 echo "  dmesg | grep -i st7701     # panel driver"
 echo "  dmesg | grep -i goodix     # touch driver"
+echo "  aplay -l | grep -i whisplay # sound card"
+echo "  python3 /opt/whisplay-hat-plus/sensors/whisplay_sensors.py # import check"
 echo "  cat /proc/bus/input/devices # touch input device"
+echo "  /opt/whisplay-hat-plus/demo/run-whisplay-hat-plus-demo.sh"

@@ -1,0 +1,156 @@
+/*
+ * Whisplay Hat+ display/touch overlay fragments.
+ *
+ * Default path: DSI0 + i2c_csi_dsi0.
+ * Optional path: DSI1 + i2c_csi_dsi1, enabled by display_dsi=1.
+ */
+
+/* DSI0 display panel */
+fragment@0 {
+	target = <&dsi0>;
+	__overlay__ {
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		panel@0 {
+			compatible = "pisugar,st7701p-480x640";
+			reg = <0>;
+			reset-gpios = <&gpio 4 1>;
+			ledc-gpios = <&gpio 22 1>;
+			status = "okay";
+
+			port {
+				panel0_in: endpoint {
+					remote-endpoint = <&dsi0_out_panel>;
+				};
+			};
+		};
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				dsi0_out_panel: endpoint {
+					remote-endpoint = <&panel0_in>;
+					data-lanes = <0 1>;
+				};
+			};
+		};
+	};
+};
+
+/* DSI0 GT911 GPIO pin configuration */
+fragment@1 {
+	target = <&gpio>;
+	__overlay__ {
+		gt911_dsi0_pins: gt911_dsi0_pins {
+			brcm,pins = <6 13>;
+			brcm,function = <0 0>;
+			brcm,pull = <2 2>;
+		};
+	};
+};
+
+/* DSI0 GT911 touch */
+fragment@2 {
+	target = <&i2c_csi_dsi0>;
+	__overlay__ {
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		touch@5d {
+			compatible = "goodix,gt911";
+			reg = <0x5d>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&gt911_dsi0_pins>;
+			interrupt-parent = <&gpio>;
+			interrupts = <13 2>;
+			irq-gpios = <&gpio 13 0>;
+			reset-gpios = <&gpio 6 0>;
+			touchscreen-size-x = <480>;
+			touchscreen-size-y = <640>;
+			touchscreen-inverted-x;
+			touchscreen-inverted-y;
+			status = "okay";
+		};
+	};
+};
+
+/* DSI1 display panel */
+fragment@3 {
+	target = <&dsi1>;
+	__dormant__ {
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		panel@0 {
+			compatible = "pisugar,st7701p-480x640";
+			reg = <0>;
+			reset-gpios = <&gpio 4 1>;
+			ledc-gpios = <&gpio 22 1>;
+			status = "okay";
+
+			port {
+				panel1_in: endpoint {
+					remote-endpoint = <&dsi1_out_panel>;
+				};
+			};
+		};
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				dsi1_out_panel: endpoint {
+					remote-endpoint = <&panel1_in>;
+					data-lanes = <0 1>;
+				};
+			};
+		};
+	};
+};
+
+/* DSI1 GT911 GPIO pin configuration */
+fragment@4 {
+	target = <&gpio>;
+	__dormant__ {
+		gt911_dsi1_pins: gt911_dsi1_pins {
+			brcm,pins = <6 13>;
+			brcm,function = <0 0>;
+			brcm,pull = <2 2>;
+		};
+	};
+};
+
+/* DSI1 GT911 touch */
+fragment@5 {
+	target = <&i2c_csi_dsi1>;
+	__dormant__ {
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		touch@5d {
+			compatible = "goodix,gt911";
+			reg = <0x5d>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&gt911_dsi1_pins>;
+			interrupt-parent = <&gpio>;
+			interrupts = <13 2>;
+			irq-gpios = <&gpio 13 0>;
+			reset-gpios = <&gpio 6 0>;
+			touchscreen-size-x = <480>;
+			touchscreen-size-y = <640>;
+			touchscreen-inverted-x;
+			touchscreen-inverted-y;
+			status = "okay";
+		};
+	};
+};

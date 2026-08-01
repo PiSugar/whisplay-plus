@@ -1,3 +1,12 @@
 .DS_Store
 doc/RP-008099-DD-1-CM5 IO Board, revision 2, KiCAD files.
 tools/
+*.dtbo
+*.ko
+*.mod
+*.mod.c
+*.o
+*.order
+*.symvers
+.*.cmd
+__pycache__/

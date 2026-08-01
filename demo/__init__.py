@@ -1,0 +1,1 @@
+"""Whisplay Hat+ demo namespace."""

@@ -1,0 +1,20 @@
+/*
+ * Whisplay Hat+ aggregate overlay.
+ *
+ * This top-level overlay includes display/touch, sound and sensor fragments.
+ */
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2712";
+
+#include "../display/dts/display.dtsi"
+#include "../sound/dts/sound.dtsi"
+#include "../sensors/sensors.dtsi"
+
+	__overrides__ {
+		display_dsi = <0>,"!0!1!2=3=4=5";
+	};
+};

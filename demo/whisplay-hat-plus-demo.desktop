@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Whisplay Hat+ Demo
+Comment=Test Whisplay Hat+ display, touch, sound, LED, button, IMU and magnetometer
+Exec=/opt/whisplay-hat-plus/demo/run-whisplay-hat-plus-demo.sh
+Icon=applications-system
+Terminal=false
+Categories=Utility;HardwareSettings;
