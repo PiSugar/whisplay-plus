@@ -77,7 +77,7 @@ class QMC6309:
         if self.chip_id != 0x90:
             raise RuntimeError(f"QMC6309 CHIP_ID=0x{self.chip_id:02x}, expected 0x90")
         self.bus.write_byte_data(addr, 0x0A, 0xC9)
-        self.bus.write_byte_data(addr, 0x0B, 0x08)
+        self.bus.write_byte_data(addr, 0x0B, 0x48)
         time.sleep(0.05)
 
     def read(self, offsets: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> MagReading:

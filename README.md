@@ -109,7 +109,7 @@ The demo is fullscreen and shows:
 Use **Cal** to calibrate sensors:
 
 1. hold the device still for about 2 seconds to capture gyro bias;
-2. rotate the device through different orientations for about 12 seconds to capture magnetometer min/max offsets.
+2. choose the known compass direction (N/E/S/W), press **Cal**, then keep the device facing that direction for a few seconds to capture the compass heading offset.
 
 Press `Esc`, `q`, or the **Quit** button to exit.
 

@@ -75,6 +75,7 @@ class HatPlusDemo:
         self.touch_points: list[tuple[int, int, float, int]] = []
         self.last_finger_event_at = 0.0
         self.buttons = []
+        self.mag_direction_buttons = []
         self.pressed_button = ""
         self.button_flash_until = 0.0
 
@@ -87,15 +88,22 @@ class HatPlusDemo:
         self.mag_filter = LowPass(0.2)
         self.gyro_offsets = (0.0, 0.0, 0.0)
         self.mag_offsets = (0.0, 0.0, 0.0)
-        self.mag_min = [32767.0, 32767.0, 32767.0]
-        self.mag_max = [-32768.0, -32768.0, -32768.0]
+        self.mag_heading_offset = 0.0
+        self.mag_directions = [
+            ("N", 0.0),
+            ("E", 90.0),
+            ("S", 180.0),
+            ("W", 270.0),
+        ]
+        self.mag_direction_index = 0
+        self.mag_heading_samples: list[float] = []
         self.calibrating = False
         self.cal_phase = ""
         self.cal_started = 0.0
         self.gyro_samples = 0
         self.gyro_sum = [0.0, 0.0, 0.0]
         self.gyro_cal_duration = 2.0
-        self.mag_cal_duration = 12.0
+        self.mag_hold_duration = 3.0
 
         self.gpio = None
         self.gpio_error = ""
@@ -213,7 +221,9 @@ class HatPlusDemo:
         self.status = "Button test: press the hardware button"
 
     def toggle_calibration(self) -> None:
-        if self.calibrating:
+        if self.calibrating and self.cal_phase == "mag_select":
+            self.start_mag_hold_phase()
+        elif self.calibrating:
             self.finish_calibration()
         else:
             self.start_calibration()
@@ -224,8 +234,7 @@ class HatPlusDemo:
         self.cal_started = time.monotonic()
         self.gyro_samples = 0
         self.gyro_sum = [0.0, 0.0, 0.0]
-        self.mag_min = [32767.0, 32767.0, 32767.0]
-        self.mag_max = [-32768.0, -32768.0, -32768.0]
+        self.mag_heading_samples = []
         self.imu_filter.reset()
         self.mag_filter.reset()
         self.status = "Hold still for gyro bias"
@@ -233,16 +242,26 @@ class HatPlusDemo:
     def finish_gyro_phase(self) -> None:
         if self.gyro_samples:
             self.gyro_offsets = tuple(v / self.gyro_samples for v in self.gyro_sum)
-        self.cal_phase = "mag"
+        self.cal_phase = "mag_select"
         self.cal_started = time.monotonic()
-        self.status = "Rotate in all directions"
+        self.status = "Select compass direction, then press Cal"
+
+    def start_mag_hold_phase(self) -> None:
+        self.cal_phase = "mag_hold"
+        self.cal_started = time.monotonic()
+        self.mag_heading_samples = []
+        label, _ = self.mag_directions[self.mag_direction_index]
+        self.status = f"Face {label} and hold still"
 
     def finish_calibration(self) -> None:
         if self.cal_phase == "gyro":
             self.finish_gyro_phase()
-        spans = [self.mag_max[i] - self.mag_min[i] for i in range(3)]
-        if spans[0] > 50 and spans[1] > 50:
-            self.mag_offsets = tuple((self.mag_min[i] + self.mag_max[i]) / 2.0 for i in range(3))
+        elif self.cal_phase == "mag_select":
+            self.start_mag_hold_phase()
+        if self.cal_phase == "mag_hold" and self.mag_heading_samples:
+            _, target = self.mag_directions[self.mag_direction_index]
+            measured = self.circular_mean_deg(self.mag_heading_samples)
+            self.mag_heading_offset = (target - measured) % 360.0
         self.calibrating = False
         self.cal_phase = ""
         self.imu_filter.reset()
@@ -336,6 +355,13 @@ class HatPlusDemo:
         return time.monotonic() - self.last_finger_event_at < 0.35
 
     def press_button_at(self, pos) -> None:
+        if self.calibrating and self.cal_phase == "mag_select":
+            for index, (_, rect) in enumerate(self.mag_direction_buttons):
+                if rect.collidepoint(pos):
+                    self.mag_direction_index = index
+                    label, _ = self.mag_directions[index]
+                    self.status = f"Direction selected: {label}"
+                    return
         for label, rect, action in self.buttons:
             if rect.collidepoint(pos):
                 self.pressed_button = label
@@ -372,15 +398,13 @@ class HatPlusDemo:
         if not self.qmc:
             return None
         try:
-            raw = self.qmc.read()
-            if self.calibrating and self.cal_phase == "mag":
-                for i, value in enumerate((raw.x, raw.y, raw.z)):
-                    self.mag_min[i] = min(self.mag_min[i], value)
-                    self.mag_max[i] = max(self.mag_max[i], value)
-                if time.monotonic() - self.cal_started >= self.mag_cal_duration:
-                    self.finish_calibration()
             reading = self.qmc.read(self.mag_offsets)
-            return self.mag_filter.update((reading.x, reading.y, reading.z, reading.heading_deg, reading.status, reading.strength))
+            if self.calibrating and self.cal_phase == "mag_hold":
+                self.mag_heading_samples.append(reading.heading_deg)
+                if time.monotonic() - self.cal_started >= self.mag_hold_duration:
+                    self.finish_calibration()
+            heading = (reading.heading_deg + self.mag_heading_offset) % 360.0
+            return self.mag_filter.update((reading.x, reading.y, reading.z, heading, reading.status, reading.strength))
         except Exception as exc:
             self.mag_error = str(exc)
             return None
@@ -412,7 +436,7 @@ class HatPlusDemo:
             self.center(str(index), (x, y), self.body_font, color)
 
         for label, rect, _ in self.buttons:
-            display = "Finish" if label == "Cal" and self.calibrating else label
+            display = "Hold" if label == "Cal" and self.cal_phase == "mag_select" else "Finish" if label == "Cal" and self.calibrating else label
             color = GREEN if label in ("Tone", "Record", "Btn", "Cal") else PANEL_2
             if label == "Quit":
                 color = (80, 50, 55)
@@ -471,6 +495,7 @@ class HatPlusDemo:
 
     def draw_mag_panel(self, x, y, w, h, mag) -> None:
         self.panel(x, y, w, h)
+        self.mag_direction_buttons = []
         self.text("QMC6309", x + 12, y + 10, self.body_font, GREEN if mag else RED)
         if mag:
             mx, my, mz, heading, status, strength = mag
@@ -480,14 +505,32 @@ class HatPlusDemo:
                 elapsed = time.monotonic() - self.cal_started
                 if self.cal_phase == "gyro":
                     self.text(f"cal: hold still {elapsed:.1f}/{self.gyro_cal_duration:.0f}s", x + 12, y + 86, self.small_font, YELLOW)
+                elif self.cal_phase == "mag_select":
+                    self.text("cal: select known direction", x + 12, y + 86, self.small_font, YELLOW)
+                    self.draw_mag_direction_buttons(x + 178, y + 82, min(w - 270, 168), 26)
                 else:
-                    self.text(f"cal: rotate {elapsed:.1f}/{self.mag_cal_duration:.0f}s", x + 12, y + 86, self.small_font, YELLOW)
+                    label, _ = self.mag_directions[self.mag_direction_index]
+                    self.text(f"cal: face {label} {elapsed:.1f}/{self.mag_hold_duration:.0f}s", x + 12, y + 86, self.small_font, YELLOW)
             else:
-                ox, oy, oz = self.mag_offsets
-                self.text(f"offset {ox:+.0f} {oy:+.0f} {oz:+.0f}", x + 12, y + 86, self.small_font, MUTED)
+                label, _ = self.mag_directions[self.mag_direction_index]
+                self.text(f"heading offset {self.mag_heading_offset:+.1f} deg  ref {label}", x + 12, y + 86, self.small_font, MUTED)
             self.draw_compass(heading, (self.width - 64, y + 62), 34)
         else:
             self.text(self.fit(self.mag_error, 42), x + 12, y + 38, self.small_font, MUTED)
+
+    def draw_mag_direction_buttons(self, x: int, y: int, w: int, h: int) -> None:
+        if w < 80:
+            return
+        gap = 5
+        bw = max(28, (w - gap * (len(self.mag_directions) - 1)) // len(self.mag_directions))
+        for index, (label, _) in enumerate(self.mag_directions):
+            rect = pygame.Rect(x + index * (bw + gap), y, bw, h)
+            self.mag_direction_buttons.append((label, rect))
+            selected = index == self.mag_direction_index
+            color = BLUE if selected else PANEL_2
+            pygame.draw.rect(self.screen, color, rect, border_radius=6)
+            pygame.draw.rect(self.screen, LINE, rect, 1, border_radius=6)
+            self.center(label, rect.center, self.small_font, TEXT)
 
     def draw_compass(self, heading: float, center, radius: int) -> None:
         pygame.draw.circle(self.screen, (18, 23, 30), center, radius)
@@ -506,6 +549,13 @@ class HatPlusDemo:
         for frac in (0.25, 0.5, 0.75):
             px = x + int(w * frac)
             pygame.draw.line(self.screen, LINE, (px, y + 2), (px, y + h - 3), 1)
+
+    def circular_mean_deg(self, values: list[float]) -> float:
+        if not values:
+            return 0.0
+        sin_sum = sum(math.sin(math.radians(value)) for value in values)
+        cos_sum = sum(math.cos(math.radians(value)) for value in values)
+        return (math.degrees(math.atan2(sin_sum, cos_sum)) + 360.0) % 360.0
 
     def draw_orientation_cube(self, accel: tuple[float, float, float], center, size: int) -> None:
         ax, ay, az = accel
