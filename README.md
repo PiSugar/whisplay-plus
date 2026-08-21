@@ -19,6 +19,7 @@ Sensor coordinate frames:
 - Screen coordinate frame uses the 480x640 screen as reference. With the screen facing the user, the lower-left corner is the origin, `X+` points right, `Y+` points up, and `Z+` points out of the screen.
 - QMC6309 magnetometer raw axes point to screen `Y-`, `X+`, and `Z+`. Convert raw magnetic readings to screen coordinates as `screen_x = raw_y`, `screen_y = -raw_x`, `screen_z = raw_z`.
 - QMI8658B gyroscope raw axes point to screen `X+`, `Y-`, and `Z-`. Convert raw gyro readings to screen coordinates as `screen_x = raw_x`, `screen_y = -raw_y`, `screen_z = -raw_z`.
+- `demo/whisplay_hat_plus_demo/default_gyro_calibration.json` records the current phone-assisted compass calibration as initial data for calibration version `8`.
 
 Display/touch GPIO mapping:
 
