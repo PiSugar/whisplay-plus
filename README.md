@@ -65,6 +65,8 @@ The installer:
 - builds and installs the aggregate `whisplay-plus.dtbo`;
 - enables `i2c_arm`, `i2s` and `spi`;
 - adds `dtoverlay=whisplay-plus` to `/boot/firmware/config.txt`;
+- disables Labwc mouse emulation for the GT911 so browser test apps receive
+  independent multi-touch contacts;
 - installs the desktop demo to `/opt/whisplay-hat-plus`.
 
 `whisplay-plus` defaults to DSI0. If a HAT EEPROM auto-loads

@@ -32,6 +32,9 @@ rm -f \
     /usr/share/applications/whisplay-sound-test.desktop \
     /usr/share/applications/whisplay-gyro-test.desktop
 
+# Keep the Labwc native multi-touch setting. Restoring a whole rc.xml backup
+# here could overwrite desktop changes made after the driver was installed.
+
 update-initramfs -u
 
 echo "=== Uninstall complete. Reboot to take effect. ==="

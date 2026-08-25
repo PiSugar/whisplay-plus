@@ -10,6 +10,62 @@ SOUND_MODULE="snd-soc-whisplay-soundcard"
 CONFIG="/boot/firmware/config.txt"
 MODEL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null || true)"
 
+configure_labwc_multitouch() {
+    local system_config="/etc/xdg/labwc/rc.xml"
+    local desktop_user="${SUDO_USER:-}"
+    local desktop_home=""
+    local desktop_group=""
+    local user_config=""
+
+    # Raspberry Pi OS enables mouse emulation for its built-in touchscreen
+    # profiles. That collapses all GT911 contacts into pointerId=1 in Chromium.
+    # Keep a one-time backup and enable native Wayland multi-touch instead.
+    if [ -f "$system_config" ]; then
+        cp -n "$system_config" "${system_config}.whisplay-backup"
+        sed -i '/Goodix Capacitive TouchScreen/ s/mouseEmulation="yes"/mouseEmulation="no"/g' \
+            "$system_config"
+    fi
+
+    if [ -z "$desktop_user" ] || [ "$desktop_user" = "root" ]; then
+        echo "  WARN: SUDO_USER is unavailable; configured system Labwc defaults only."
+        return
+    fi
+
+    desktop_home="$(getent passwd "$desktop_user" | cut -d: -f6)"
+    desktop_group="$(id -gn "$desktop_user")"
+    if [ -z "$desktop_home" ] || [ ! -d "$desktop_home" ]; then
+        echo "  WARN: cannot find home directory for desktop user $desktop_user."
+        return
+    fi
+
+    user_config="$desktop_home/.config/labwc/rc.xml"
+    install -d -m 0755 -o "$desktop_user" -g "$desktop_group" \
+        "$desktop_home/.config/labwc"
+
+    if [ ! -f "$user_config" ]; then
+        cat > "$user_config" <<'EOF'
+<?xml version="1.0"?>
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+	<touch deviceName="Goodix Capacitive TouchScreen" mapToOutput="DSI-1" mouseEmulation="no"/>
+</openbox_config>
+EOF
+    else
+        cp -n "$user_config" "${user_config}.whisplay-backup"
+        if grep -q 'deviceName="Goodix Capacitive TouchScreen"' "$user_config"; then
+            sed -i '/deviceName="Goodix Capacitive TouchScreen"/ s/mouseEmulation="yes"/mouseEmulation="no"/g' \
+                "$user_config"
+        elif grep -q '</openbox_config>' "$user_config"; then
+            sed -i '/<\/openbox_config>/i\	<touch deviceName="Goodix Capacitive TouchScreen" mapToOutput="DSI-1" mouseEmulation="no"\/>' \
+                "$user_config"
+        else
+            echo "  WARN: $user_config has no </openbox_config>; cannot add GT911 multi-touch entry."
+        fi
+    fi
+
+    chown "$desktop_user:$desktop_group" "$user_config"
+    echo "  Enabled native GT911 multi-touch for Labwc user $desktop_user."
+}
+
 echo "=== Whisplay Hat+ Driver Installer ==="
 
 # Whisplay Hat+ defaults to DSI0. If HAT EEPROM auto-loads this overlay and
@@ -126,6 +182,10 @@ if ! grep -q "^dtoverlay=vc4-kms-v3d" "$CONFIG"; then
     echo "  WARNING: dtoverlay=vc4-kms-v3d not found in config.txt"
     echo "  You may need to add it manually for display to work"
 fi
+
+# Disable Labwc mouse emulation so GTK/Chromium applications receive every
+# GT911 contact as an independent Wayland touch point.
+configure_labwc_multitouch
 
 # 6. Install demo and update initramfs
 echo "[6/6] Installing desktop demo and updating initramfs..."
