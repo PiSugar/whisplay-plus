@@ -27,6 +27,10 @@ sed -i "/^dtoverlay=whisplay-soundcard/d" "$CONFIG"
 
 rm -rf /opt/whisplay-hat-plus
 rm -f /usr/share/applications/whisplay-hat-plus-demo.desktop
+rm -f \
+    /usr/share/applications/whisplay-touch-test.desktop \
+    /usr/share/applications/whisplay-sound-test.desktop \
+    /usr/share/applications/whisplay-gyro-test.desktop
 
 update-initramfs -u
 

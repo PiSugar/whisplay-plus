@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Whisplay Sound Test
+Name[zh_CN]=Whisplay 声音测试
+Comment=Record and play audio on the Whisplay Sound card
+Comment[zh_CN]=录制并播放 Whisplay 声卡音频
+Exec=/opt/whisplay-hat-plus/demo/test_apps/sound/run_sound_test.sh
+Icon=/opt/whisplay-hat-plus/demo/test_apps/icons/whisplay-sound-test.svg
+Terminal=false
+Categories=AudioVideo;Audio;
+StartupNotify=true

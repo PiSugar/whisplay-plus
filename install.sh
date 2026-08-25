@@ -63,6 +63,8 @@ fi
 apt-get install -y python3-libgpiod 2>/dev/null || \
 apt-get install -y python3-gpiod 2>/dev/null || \
 echo "  WARN: python gpiod binding not installed; LED/button demo may need python3-libgpiod."
+apt-get install -y python3-flask python3-qrcode openssl || \
+echo "  WARN: phone-assisted GYRO calibration needs Flask, qrcode and OpenSSL."
 
 # 2. Build kernel module
 echo "[2/6] Building display and sound kernel modules..."
@@ -132,7 +134,14 @@ mkdir -p /opt/whisplay-hat-plus
 cp -a "$SCRIPT_DIR/demo" /opt/whisplay-hat-plus/
 cp -a "$SCRIPT_DIR/sensors" /opt/whisplay-hat-plus/
 chmod +x /opt/whisplay-hat-plus/demo/run-whisplay-hat-plus-demo.sh
+chmod +x \
+    /opt/whisplay-hat-plus/demo/test_apps/touch/run.sh \
+    /opt/whisplay-hat-plus/demo/test_apps/sound/run_sound_test.sh \
+    /opt/whisplay-hat-plus/demo/test_apps/gyro/run_gyro_test.sh
 install -m 644 "$SCRIPT_DIR/demo/whisplay-hat-plus-demo.desktop" /usr/share/applications/
+for desktop in "$SCRIPT_DIR"/demo/test_apps/*/*.desktop; do
+    install -m 644 "$desktop" /usr/share/applications/
+done
 
 cat > /etc/asound.conf <<'EOF'
 pcm.!default {
@@ -159,3 +168,6 @@ echo "  aplay -l | grep -i whisplay # sound card"
 echo "  python3 /opt/whisplay-hat-plus/sensors/whisplay_sensors.py # import check"
 echo "  cat /proc/bus/input/devices # touch input device"
 echo "  /opt/whisplay-hat-plus/demo/run-whisplay-hat-plus-demo.sh"
+echo "  /opt/whisplay-hat-plus/demo/test_apps/touch/run.sh"
+echo "  /opt/whisplay-hat-plus/demo/test_apps/sound/run_sound_test.sh"
+echo "  /opt/whisplay-hat-plus/demo/test_apps/gyro/run_gyro_test.sh"

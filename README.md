@@ -42,6 +42,7 @@ sensors/sensors.dtsi             QMI8658B/QMC6309 overlay fragments
 sensors/whisplay_sensors.py     User-space QMI8658B/QMC6309 sensor helper
 demo/                           Raspberry Pi OS Desktop hardware demo
 demo/whisplay_hat_plus_demo/gyro_map.py  Reusable gyro/compass simulated map
+demo/test_apps/                 Standalone touch, sound and GYRO test apps
 install.sh                      One-shot installer
 uninstall.sh                    Uninstaller
 ```
@@ -115,6 +116,16 @@ The demo is fullscreen and shows:
 - QMC6309 magnetic vector and heading.
 
 The circular simulated map is implemented in `demo/whisplay_hat_plus_demo/gyro_map.py`. `GyroMap` owns the map position, linear-acceleration motion model, gravity tracking, heading rotation, touch handling and the complete 480x640 modal rendering. Pass screen-frame IMU samples as `(ax, ay, az, gx, gy, gz)` and a fused compass heading to `GyroMap.update()`; attitude-only changes are removed before acceleration is integrated into map movement.
+
+Three standalone hardware diagnostics are installed with the demo:
+
+```bash
+/opt/whisplay-hat-plus/demo/test_apps/touch/run.sh
+/opt/whisplay-hat-plus/demo/test_apps/sound/run_sound_test.sh
+/opt/whisplay-hat-plus/demo/test_apps/gyro/run_gyro_test.sh
+```
+
+Their source, desktop entries, icons and runtime notes are kept under `demo/test_apps/`.
 
 Use **Cal** to calibrate sensors:
 

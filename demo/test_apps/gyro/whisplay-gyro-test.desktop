@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Whisplay GYRO Test
+Name[zh_CN]=Whisplay 陀螺仪测试
+Comment=Test QMI8658B gyroscope and QMC6309 magnetometer
+Comment[zh_CN]=测试 QMI8658B 陀螺仪和 QMC6309 磁力计
+Exec=/opt/whisplay-hat-plus/demo/test_apps/gyro/run_gyro_test.sh
+Icon=/opt/whisplay-hat-plus/demo/test_apps/icons/whisplay-gyro-test.svg
+Terminal=false
+Categories=Settings;HardwareSettings;
+StartupNotify=true

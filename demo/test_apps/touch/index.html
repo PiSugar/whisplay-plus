@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>PiSugar Touch Test</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --ink: #171717;
+      --muted: #66665f;
+      --line: #d9d6ca;
+      --panel: #ffffff;
+      --panel-2: #f0eee7;
+      --accent: #147a7e;
+      --danger: #b3261e;
+      --shadow: 0 10px 30px rgb(0 0 0 / 0.10);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+      overscroll-behavior: none;
+    }
+
+    button {
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0 14px;
+      background: var(--panel);
+      color: var(--ink);
+      font: inherit;
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    .quit-button {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      z-index: 6;
+      min-width: 62px;
+      min-height: 34px;
+      border-color: rgb(23 23 23 / 0.18);
+      background: rgb(255 255 255 / 0.86);
+      box-shadow: 0 8px 22px rgb(0 0 0 / 0.14);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .app {
+      position: relative;
+      height: 100%;
+      min-width: 320px;
+    }
+
+    .topbar {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 64px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: 0 2px 18px rgb(0 0 0 / 0.06);
+      z-index: 5;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .stage {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .touch-surface {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background:
+        linear-gradient(var(--line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line) 1px, transparent 1px),
+        radial-gradient(circle at 50% 50%, rgb(20 122 126 / 0.10), transparent 48%),
+        var(--bg);
+      background-size: 48px 48px, 48px 48px, 100% 100%, 100% 100%;
+      touch-action: none;
+      cursor: crosshair;
+    }
+
+    #trail {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .axis {
+      position: absolute;
+      z-index: 1;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0;
+      pointer-events: none;
+    }
+
+    .axis.top {
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .axis.bottom {
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .axis.left {
+      top: 50%;
+      left: 10px;
+      transform: translateY(-50%);
+    }
+
+    .axis.right {
+      top: 50%;
+      right: 10px;
+      transform: translateY(-50%);
+    }
+
+    .target {
+      position: absolute;
+      z-index: 1;
+      width: 58px;
+      height: 58px;
+      border: 2px solid rgb(23 23 23 / 0.58);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .target::after {
+      content: "";
+      position: absolute;
+      inset: 18px;
+      border-radius: 50%;
+      background: rgb(23 23 23 / 0.42);
+    }
+
+    .target.tl {
+      top: 24px;
+      left: 24px;
+    }
+
+    .target.tr {
+      top: 24px;
+      right: 24px;
+    }
+
+    .target.bl {
+      bottom: 24px;
+      left: 24px;
+    }
+
+    .target.br {
+      right: 24px;
+      bottom: 24px;
+    }
+
+    .point {
+      position: absolute;
+      z-index: 3;
+      width: var(--size);
+      height: var(--size);
+      border: 3px solid #fff;
+      border-radius: 50%;
+      background: var(--color);
+      box-shadow: 0 0 0 2px rgb(0 0 0 / 0.20), 0 8px 20px rgb(0 0 0 / 0.22);
+      transform: translate(calc(var(--x) - var(--size) / 2), calc(var(--y) - var(--size) / 2));
+      pointer-events: none;
+    }
+
+    .point span {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 800;
+      line-height: 1;
+      text-shadow: 0 1px 2px rgb(0 0 0 / 0.50);
+    }
+
+    .hud {
+      display: flex;
+      flex-direction: column;
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      z-index: 4;
+      width: min(236px, calc(100vw - 16px));
+      max-height: calc(100vh - 16px);
+      overflow: hidden;
+      border: 1px solid rgb(23 23 23 / 0.12);
+      border-radius: 8px;
+      background: rgb(255 255 255 / 0.82);
+      box-shadow: 0 8px 24px rgb(0 0 0 / 0.14);
+      pointer-events: none;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 4px;
+      padding: 6px;
+      border-bottom: 1px solid var(--line);
+      background: rgb(240 238 231 / 0.82);
+    }
+
+    .metric {
+      min-width: 0;
+      border: 0;
+      border-radius: 6px;
+      padding: 4px 5px;
+      background: rgb(255 255 255 / 0.74);
+    }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 9px;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .metric-value {
+      margin-top: 1px;
+      font-size: 15px;
+      font-weight: 800;
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .status {
+      padding: 5px 7px;
+      border-bottom: 1px solid var(--line);
+      font-size: 10px;
+      color: var(--muted);
+      line-height: 1.3;
+    }
+
+    .status strong {
+      color: var(--ink);
+    }
+
+    .section-title {
+      padding: 6px 7px 4px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .touch-list,
+    .event-log {
+      margin: 0 6px 6px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgb(255 255 255 / 0.80);
+      overflow: hidden;
+    }
+
+    .touch-list {
+      min-height: 28px;
+      max-height: min(168px, calc(100vh - 116px));
+      overflow: hidden;
+    }
+
+    .touch-row {
+      display: grid;
+      grid-template-columns: 14px 1fr;
+      gap: 5px;
+      padding: 4px 6px;
+      border-bottom: 1px solid var(--line);
+      font-size: 10px;
+      line-height: 1.25;
+    }
+
+    .touch-row:last-child {
+      border-bottom: 0;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      margin-top: 1px;
+      border-radius: 50%;
+      background: var(--color);
+      box-shadow: inset 0 0 0 2px rgb(255 255 255 / 0.75);
+    }
+
+    .empty {
+      padding: 7px 6px;
+      color: var(--muted);
+      font-size: 10px;
+      text-align: center;
+    }
+
+    .event-log {
+      display: none;
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .event {
+      padding: 6px 8px;
+      border-bottom: 1px solid #ece9df;
+      white-space: pre-wrap;
+    }
+
+    .event:last-child {
+      border-bottom: 0;
+    }
+
+    .event.warn {
+      color: var(--danger);
+    }
+
+    @media (max-width: 700px) {
+      .topbar {
+        align-items: flex-start;
+      }
+
+      .hud {
+        top: 6px;
+        right: 6px;
+        width: min(202px, calc(100vw - 12px));
+        max-height: calc(100vh - 12px);
+      }
+
+      .metrics {
+        padding: 5px;
+      }
+
+      .metric {
+        padding: 7px 8px;
+      }
+
+      .metric-value {
+        font-size: 18px;
+      }
+
+      .status,
+      .section-title,
+      .event-log {
+        display: none;
+      }
+
+      .touch-list {
+        margin: 0 5px 5px;
+        min-height: 24px;
+        max-height: 96px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <button id="quit" class="quit-button" type="button">Quit</button>
+
+    <header class="topbar">
+      <div>
+        <h1>PiSugar 触控测试</h1>
+        <p class="subtitle">GT911 / KDE Plasma / 多点触控</p>
+      </div>
+      <div class="actions">
+        <button id="fullscreen" type="button">全屏</button>
+        <button id="clear" type="button">清空</button>
+      </div>
+    </header>
+
+    <main class="stage">
+      <section id="surface" class="touch-surface" aria-label="touch test surface">
+        <canvas id="trail"></canvas>
+        <div class="axis top">上</div>
+        <div class="axis bottom">下</div>
+        <div class="axis left">左</div>
+        <div class="axis right">右</div>
+        <div class="target tl"></div>
+        <div class="target tr"></div>
+        <div class="target bl"></div>
+        <div class="target br"></div>
+        <div id="points"></div>
+      </section>
+
+      <aside class="hud">
+        <div class="metrics">
+          <div class="metric">
+            <div class="metric-label">当前点数</div>
+            <div id="activeCount" class="metric-value">0</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">最高点数</div>
+            <div id="maxCount" class="metric-value">0</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">浏览器</div>
+            <div id="pointerSupport" class="metric-value">--</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">系统</div>
+            <div id="systemTouch" class="metric-value">--</div>
+          </div>
+        </div>
+
+        <div id="status" class="status"></div>
+        <div class="section-title">活动触点</div>
+        <div id="touchList" class="touch-list">
+          <div class="empty">等待触摸</div>
+        </div>
+        <div class="section-title">事件</div>
+        <div id="eventLog" class="event-log"></div>
+      </aside>
+    </main>
+  </div>
+
+  <script>
+    (() => {
+      const surface = document.getElementById("surface");
+      const canvas = document.getElementById("trail");
+      const ctx = canvas.getContext("2d");
+      const pointsLayer = document.getElementById("points");
+      const activeCount = document.getElementById("activeCount");
+      const maxCount = document.getElementById("maxCount");
+      const pointerSupport = document.getElementById("pointerSupport");
+      const systemTouch = document.getElementById("systemTouch");
+      const status = document.getElementById("status");
+      const touchList = document.getElementById("touchList");
+      const eventLog = document.getElementById("eventLog");
+      const fullscreen = document.getElementById("fullscreen");
+      const clear = document.getElementById("clear");
+      const quit = document.getElementById("quit");
+
+      const colors = [
+        "#d64045", "#147a7e", "#7251b5", "#e07a1f", "#27843c",
+        "#0b6fbd", "#bc2d75", "#827300", "#0f8b8d", "#8f4e00"
+      ];
+      const active = new Map();
+      const colorById = new Map();
+      const retainedLogs = [];
+      let maxActive = 0;
+      let lastRender = 0;
+      let fullscreenRequested = false;
+
+      function colorFor(id) {
+        if (!colorById.has(id)) {
+          colorById.set(id, colors[colorById.size % colors.length]);
+        }
+        return colorById.get(id);
+      }
+
+      function resizeCanvas() {
+        const rect = surface.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.max(1, Math.round(rect.width * dpr));
+        canvas.height = Math.max(1, Math.round(rect.height * dpr));
+        canvas.style.width = `${rect.width}px`;
+        canvas.style.height = `${rect.height}px`;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+      }
+
+      function positionFromClient(clientX, clientY) {
+        const rect = surface.getBoundingClientRect();
+        return {
+          x: Math.min(rect.width, Math.max(0, clientX - rect.left)),
+          y: Math.min(rect.height, Math.max(0, clientY - rect.top)),
+          width: rect.width,
+          height: rect.height
+        };
+      }
+
+      function drawSegment(item, point) {
+        if (!item.last) {
+          item.last = point;
+          return;
+        }
+
+        ctx.strokeStyle = item.color;
+        ctx.globalAlpha = 0.72;
+        ctx.lineWidth = Math.max(4, Math.min(14, 5 + item.pressure * 9));
+        ctx.beginPath();
+        ctx.moveTo(item.last.x, item.last.y);
+        ctx.lineTo(point.x, point.y);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        item.last = point;
+      }
+
+      function addLog(text, warn = false) {
+        const stamp = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+        retainedLogs.unshift({ text: `${stamp}  ${text}`, warn });
+        retainedLogs.splice(28);
+        eventLog.innerHTML = retainedLogs.map((entry) =>
+          `<div class="event${entry.warn ? " warn" : ""}">${escapeHtml(entry.text)}</div>`
+        ).join("");
+      }
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, (ch) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          "\"": "&quot;",
+          "'": "&#39;"
+        }[ch]));
+      }
+
+      function upsertTouch(id, point, pressure, type, phase) {
+        const key = String(id);
+        const item = active.get(key) || {
+          id: key,
+          color: colorFor(key),
+          startedAt: performance.now(),
+          samples: 0,
+          last: null
+        };
+        item.x = point.x;
+        item.y = point.y;
+        item.width = point.width;
+        item.height = point.height;
+        item.pressure = Number.isFinite(pressure) ? pressure : 0;
+        item.type = type || "touch";
+        item.samples += 1;
+        active.set(key, item);
+
+        drawSegment(item, point);
+        maxActive = Math.max(maxActive, active.size);
+
+        if (phase === "down") {
+          addLog(`DOWN  id=${key} x=${point.x.toFixed(0)} y=${point.y.toFixed(0)} type=${item.type}`);
+        }
+
+        scheduleRender();
+      }
+
+      function removeTouch(id, point, reason) {
+        const key = String(id);
+        const item = active.get(key);
+        if (item && point) {
+          drawSegment(item, point);
+        }
+        if (active.delete(key)) {
+          addLog(`${reason.toUpperCase()}  id=${key}`);
+        }
+        scheduleRender();
+      }
+
+      function scheduleRender() {
+        if (lastRender) return;
+        lastRender = requestAnimationFrame(() => {
+          lastRender = 0;
+          render();
+        });
+      }
+
+      function render() {
+        activeCount.textContent = active.size;
+        maxCount.textContent = maxActive;
+
+        pointsLayer.innerHTML = [...active.values()].map((item) => {
+          const size = 46 + Math.round((item.pressure || 0) * 18);
+          return `<div class="point" style="--x:${item.x}px;--y:${item.y}px;--size:${size}px;--color:${item.color}"><span>${escapeHtml(item.id)}</span></div>`;
+        }).join("");
+
+        if (!active.size) {
+          touchList.innerHTML = `<div class="empty">等待触摸</div>`;
+          return;
+        }
+
+        touchList.innerHTML = [...active.values()].map((item) => {
+          const x = item.x.toFixed(0).padStart(3, " ");
+          const y = item.y.toFixed(0).padStart(3, " ");
+          const px = item.width ? Math.round((item.x / item.width) * 100) : 0;
+          const py = item.height ? Math.round((item.y / item.height) * 100) : 0;
+          const p = Math.round((item.pressure || 0) * 100);
+          return `
+            <div class="touch-row">
+              <div class="dot" style="--color:${item.color}"></div>
+              <div>
+                <strong>ID ${escapeHtml(item.id)}</strong> ${escapeHtml(item.type)}
+                <br>x=${x}, y=${y}, ${px}% / ${py}%, pressure=${p}%
+              </div>
+            </div>`;
+        }).join("");
+      }
+
+      function updateStatus() {
+        const pointerOk = "PointerEvent" in window;
+        pointerSupport.textContent = pointerOk ? "PE" : "TE";
+        systemTouch.textContent = navigator.maxTouchPoints || 0;
+        const parts = [
+          `<strong>Pointer Events</strong>: ${pointerOk ? "可用" : "不可用"}`,
+          `<strong>maxTouchPoints</strong>: ${navigator.maxTouchPoints || 0}`,
+          `<strong>Viewport</strong>: ${window.innerWidth}x${window.innerHeight}`,
+          `<strong>DPR</strong>: ${(window.devicePixelRatio || 1).toFixed(2)}`
+        ];
+        status.innerHTML = parts.join("<br>");
+      }
+
+      async function requestTestFullscreen() {
+        if (!document.fullscreenEnabled || document.fullscreenElement || fullscreenRequested) return;
+        fullscreenRequested = true;
+        try {
+          await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+          addLog("FULLSCREEN");
+        } catch (error) {
+          fullscreenRequested = false;
+        }
+      }
+
+      function clearAll() {
+        active.clear();
+        maxActive = 0;
+        colorById.clear();
+        retainedLogs.length = 0;
+        resizeCanvas();
+        render();
+        addLog("CLEAR");
+      }
+
+      async function quitApp() {
+        addLog("QUIT");
+        try {
+          const response = await fetch("/quit", { method: "POST", cache: "no-store" });
+          if (response.ok) return;
+        } catch (error) {
+          // File URLs cannot call the local launcher; fall through to browser-level close.
+        }
+        try {
+          if (document.fullscreenElement) {
+            await document.exitFullscreen();
+          }
+        } catch (error) {
+          addLog(`QUIT ${error.message}`, true);
+        }
+        window.close();
+        setTimeout(() => {
+          location.href = "whisplay-touch://quit";
+        }, 120);
+      }
+
+      function handlePointerDown(event) {
+        event.preventDefault();
+        requestTestFullscreen();
+        surface.setPointerCapture?.(event.pointerId);
+        upsertTouch(
+          event.pointerId,
+          positionFromClient(event.clientX, event.clientY),
+          event.pressure,
+          event.pointerType,
+          "down"
+        );
+      }
+
+      function handlePointerMove(event) {
+        event.preventDefault();
+        if (!active.has(String(event.pointerId))) return;
+        upsertTouch(
+          event.pointerId,
+          positionFromClient(event.clientX, event.clientY),
+          event.pressure,
+          event.pointerType,
+          "move"
+        );
+      }
+
+      function handlePointerEnd(event) {
+        event.preventDefault();
+        removeTouch(
+          event.pointerId,
+          positionFromClient(event.clientX, event.clientY),
+          event.type.replace("pointer", "") || "up"
+        );
+      }
+
+      function handleTouchChange(event, phase) {
+        event.preventDefault();
+        if (phase === "start") requestTestFullscreen();
+        for (const touch of event.changedTouches) {
+          const point = positionFromClient(touch.clientX, touch.clientY);
+          if (phase === "end" || phase === "cancel") {
+            removeTouch(touch.identifier, point, phase);
+          } else {
+            upsertTouch(touch.identifier, point, touch.force || 0, "touch", phase === "start" ? "down" : "move");
+          }
+        }
+      }
+
+      if ("PointerEvent" in window) {
+        surface.addEventListener("pointerdown", handlePointerDown, { passive: false });
+        surface.addEventListener("pointermove", handlePointerMove, { passive: false });
+        surface.addEventListener("pointerup", handlePointerEnd, { passive: false });
+        surface.addEventListener("pointercancel", handlePointerEnd, { passive: false });
+        surface.addEventListener("lostpointercapture", handlePointerEnd, { passive: false });
+      } else {
+        surface.addEventListener("touchstart", (event) => handleTouchChange(event, "start"), { passive: false });
+        surface.addEventListener("touchmove", (event) => handleTouchChange(event, "move"), { passive: false });
+        surface.addEventListener("touchend", (event) => handleTouchChange(event, "end"), { passive: false });
+        surface.addEventListener("touchcancel", (event) => handleTouchChange(event, "cancel"), { passive: false });
+      }
+
+      fullscreen.addEventListener("click", async () => {
+        try {
+          if (document.fullscreenElement) {
+            await document.exitFullscreen();
+          } else {
+            await document.documentElement.requestFullscreen();
+          }
+        } catch (error) {
+          addLog(`FULLSCREEN ${error.message}`, true);
+        }
+      });
+
+      clear.addEventListener("click", clearAll);
+      quit.addEventListener("click", quitApp);
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "f" || event.key === "F") {
+          event.preventDefault();
+          requestTestFullscreen();
+        } else if (event.key === "c" || event.key === "C") {
+          event.preventDefault();
+          clearAll();
+        } else if (event.key === "Escape" || event.key === "q" || event.key === "Q") {
+          event.preventDefault();
+          quitApp();
+        }
+      });
+      document.addEventListener("fullscreenchange", () => {
+        if (!document.fullscreenElement) fullscreenRequested = false;
+      });
+      window.addEventListener("resize", () => {
+        resizeCanvas();
+        updateStatus();
+        render();
+      });
+      window.addEventListener("contextmenu", (event) => event.preventDefault());
+
+      resizeCanvas();
+      updateStatus();
+      render();
+      addLog("READY");
+    })();
+  </script>
+</body>
+</html>
