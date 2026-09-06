@@ -6,9 +6,9 @@
  *   Panel:  ST7701P, 480x640, MIPI-DSI 2-lane, RGB888
  *   Touch:  GT911 on matching DSI I2C bus (handled by kernel goodix_ts)
  *
- * GPIO mapping (active-low accent):
+ * GPIO mapping:
  *   RST   -> GPIO4   (panel reset, active-low)
- *   LEDC  -> GPIO22  (backlight enable, active-low)
+ *   LEDC  -> GPIO22  (backlight enable, polarity from device tree)
  *   TPRST -> GPIO6   (touch reset, active-low, in overlay)
  *   TPINT -> GPIO13  (touch interrupt, active-low)
  *

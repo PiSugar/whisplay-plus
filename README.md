@@ -13,6 +13,7 @@ Whisplay Hat+ driver project for Raspberry Pi OS Desktop. It bundles the existin
 | Magnetometer | QMC6309, I2C1 address `0x7c`, expected ID `0x90` |
 | RGB LED | Same physical pins as Whisplay runtime: BOARD `22/18/16` |
 | Button | Same physical pin as Whisplay runtime: BOARD `11`, pressed = high |
+| Grove Port.X | I2C / UART, selected by BOARD `13` (GPIO27): low = UART, high = I2C |
 
 Sensor coordinate frames:
 
@@ -26,9 +27,10 @@ Display/touch GPIO mapping:
 | Function | GPIO |
 | --- | --- |
 | Panel reset | GPIO4, active low |
-| Backlight enable | GPIO22, active low |
+| Backlight enable | GPIO22, active high by default |
 | Touch reset | GPIO6 |
 | Touch IRQ | GPIO13, falling edge |
+| Grove Port.X mode select | GPIO27 (BOARD pin 13): low = UART, high = I2C |
 
 ## Layout
 
@@ -79,6 +81,46 @@ dtparam=display_dsi=1
 
 Do not add an empty `dtoverlay=` line for this use case; that disables
 automatic HAT EEPROM overlay loading globally.
+
+The current hardware uses an active-high backlight signal. For an older board
+whose backlight is active low, use this overlay line instead:
+
+```ini
+dtoverlay=whisplay-plus,backlight_active_low
+```
+
+If the overlay is loaded automatically from the HAT EEPROM, add
+`dtparam=backlight_active_low=on` before the overlay is loaded instead.
+
+### Grove Port.X mode
+
+The overlay drives GPIO27 (BOARD pin 13) high by default, selecting I2C on
+Grove Port.X:
+
+```ini
+dtoverlay=whisplay-plus
+```
+
+Select UART by adding the `port_x_uart` parameter. This makes GPIO27 output a
+physical low level:
+
+```ini
+dtoverlay=whisplay-plus,port_x_uart
+```
+
+If the HAT EEPROM loads the overlay automatically, select UART before the
+overlay is loaded instead:
+
+```ini
+dtparam=port_x_uart=on
+```
+
+The selector only routes Port.X to UART; UART must also be enabled in
+`/boot/firmware/config.txt` when it is used:
+
+```ini
+enable_uart=1
+```
 
 ## Verify
 
@@ -141,4 +183,4 @@ Press `Esc`, `q`, or the **Quit** button to exit.
 - QMC6309 uses address `0x7c` on this Whisplay Hat+ design. Do not convert it to `0x3e` for the current board.
 - The magnetometer is sensitive to the onboard speaker, magnets, cables and nearby metal. A hard-iron/soft-iron calibration is still recommended for accurate heading.
 - The demo uses user-space I2C for QMI8658B/QMC6309 so it can run without an IIO kernel driver.
-- HAT EEPROM can name `whisplay-plus.dtbo`; users can override the display port with `dtparam=display_dsi=1` while keeping EEPROM auto-loading enabled.
+- HAT EEPROM can name `whisplay-plus.dtbo`; users can override the display port with `dtparam=display_dsi=1` and old-board backlight polarity with `dtparam=backlight_active_low=on` while keeping EEPROM auto-loading enabled.

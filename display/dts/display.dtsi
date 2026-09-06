@@ -13,11 +13,11 @@ fragment@0 {
 		#address-cells = <1>;
 		#size-cells = <0>;
 
-		panel@0 {
+		panel0: panel@0 {
 			compatible = "pisugar,st7701p-480x640";
 			reg = <0>;
 			reset-gpios = <&gpio 4 1>;
-			ledc-gpios = <&gpio 22 1>;
+			ledc-gpios = <&gpio 22 0>;
 			status = "okay";
 
 			port {
@@ -88,11 +88,11 @@ fragment@3 {
 		#address-cells = <1>;
 		#size-cells = <0>;
 
-		panel@0 {
+		panel1: panel@0 {
 			compatible = "pisugar,st7701p-480x640";
 			reg = <0>;
 			reset-gpios = <&gpio 4 1>;
-			ledc-gpios = <&gpio 22 1>;
+			ledc-gpios = <&gpio 22 0>;
 			status = "okay";
 
 			port {

@@ -14,7 +14,29 @@
 #include "../sound/dts/sound.dtsi"
 #include "../sensors/sensors.dtsi"
 
+	/*
+	 * Grove Port.X interface select. Keep the line logically asserted:
+	 * active high produces a physical high level (I2C, the default), while
+	 * the port_x_uart override changes it to active low (physical low).
+	 */
+	fragment@11 {
+		target = <&gpio>;
+
+		__overlay__ {
+			port_x_select: port-x-select {
+				gpio-hog;
+				gpios = <27 0>;
+				output-high;
+				line-name = "grove-port-x-select";
+			};
+		};
+	};
+
 	__overrides__ {
 		display_dsi = <0>,"!0!1!2=3=4=5";
+		backlight_active_low = <&panel0>,"ledc-gpios:8",
+				       <&panel1>,"ledc-gpios:8";
+		/* Toggle GPIO_ACTIVE_LOW in the gpio-hog's flags cell. */
+		port_x_uart = <&port_x_select>,"gpios:4";
 	};
 };
