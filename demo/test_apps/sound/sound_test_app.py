@@ -35,6 +35,10 @@ SAMPLE_WIDTH = 2
 RECORD_SECONDS = 5.0
 RECORDING = Path("/tmp/whisplay-sound-test.wav")
 TONE = Path("/tmp/whisplay-sound-tone.wav")
+STEREO_THRESHOLD_DB = 3.0
+STEREO_SILENCE_LEVEL = 0.015
+STEREO_BALANCE_RANGE_DB = 6.0
+STEREO_BALANCE_SMOOTH_SECONDS = 0.20
 
 
 def run_text(args: list[str]) -> str:
@@ -62,7 +66,7 @@ def prop(block: str, key: str) -> str:
     return block[start:end] if end >= 0 else ""
 
 
-def audio_device(kind: str, direction: str) -> tuple[str, str, str]:
+def audio_device(kind: str, direction: str, require_stereo: bool = False) -> tuple[str, str, str]:
     output = run_text(["pactl", "list", kind])
     blocks = [part for part in output.split("\n\n") if part.strip()]
     fallback: tuple[str, str, str] = ("", "not found", "")
@@ -79,14 +83,53 @@ def audio_device(kind: str, direction: str) -> tuple[str, str, str]:
         card = prop(block, "alsa.card_name") or prop(block, "api.alsa.card.name")
         codec = prop(block, "node.nick") or prop(block, "alsa.name")
         hw = prop(block, "api.alsa.path")
+        sample_spec = next(
+            (line.split("Sample Specification:", 1)[1].strip()
+             for line in lines if "Sample Specification:" in line),
+            "",
+        )
+        channel_map = next(
+            (line.split("Channel Map:", 1)[1].strip()
+             for line in lines if "Channel Map:" in line),
+            "",
+        )
+        is_stereo = " 2ch " in f" {sample_spec} " or "," in channel_map
+        if require_stereo and not is_stereo:
+            continue
         label = f"{card} {direction}".strip() if card else name
-        detail = " ".join(part for part in (codec, hw) if part)
+        detail = " ".join(part for part in (codec, hw, channel_map) if part)
         candidate = (name, label, detail)
         if fallback[0] == "":
             fallback = candidate
         if card == "Whisplay Sound" or "whisplaysound" in block.lower():
             return candidate
     return fallback
+
+
+def stereo_levels(chunk: bytes) -> tuple[float, float]:
+    sample_count = len(chunk) // SAMPLE_WIDTH
+    sample_count -= sample_count % 2
+    if sample_count < 2:
+        return 0.0, 0.0
+    samples = struct.unpack(f"<{sample_count}h", chunk[: sample_count * SAMPLE_WIDTH])
+    frames = sample_count // 2
+    left_sq = sum(value * value for value in samples[0::2])
+    right_sq = sum(value * value for value in samples[1::2])
+    return (
+        min(1.0, math.sqrt(left_sq / frames) / 32768.0),
+        min(1.0, math.sqrt(right_sq / frames) / 32768.0),
+    )
+
+
+def stereo_direction(left: float, right: float) -> tuple[str, float]:
+    if max(left, right) < STEREO_SILENCE_LEVEL:
+        return "Waiting for sound", 0.0
+    delta_db = 20.0 * math.log10((left + 1e-6) / (right + 1e-6))
+    if delta_db >= STEREO_THRESHOLD_DB:
+        return "LEFT", delta_db
+    if delta_db <= -STEREO_THRESHOLD_DB:
+        return "RIGHT", delta_db
+    return "CENTER", delta_db
 
 
 def duration_seconds(path: Path) -> float:
@@ -188,6 +231,74 @@ class Recorder:
             return 0.0
 
 
+class StereoMonitor:
+    def __init__(self, source: str):
+        self.source = source
+        self.process: subprocess.Popen[bytes] | None = None
+        self.thread: threading.Thread | None = None
+        self.stop_event = threading.Event()
+        self.left = 0.0
+        self.right = 0.0
+        self.direction = "Stopped"
+        self.delta_db = 0.0
+        self.error = ""
+
+    @property
+    def active(self) -> bool:
+        return bool(self.thread and self.thread.is_alive())
+
+    def start(self) -> None:
+        self.stop()
+        self.stop_event.clear()
+        self.error = ""
+        self.direction = "Waiting for sound"
+        if not self.source:
+            self.error = "No stereo Whisplay input found"
+            return
+        self.thread = threading.Thread(target=self._capture, daemon=True)
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        if self.process and self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+        self.process = None
+
+    def _capture(self) -> None:
+        cmd = [
+            "parecord",
+            f"--device={self.source}",
+            "--raw",
+            "--format=s16le",
+            f"--rate={RATE}",
+            "--channels=2",
+        ]
+        try:
+            self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            if not self.process.stdout:
+                raise RuntimeError("cannot read stereo capture")
+            while not self.stop_event.is_set():
+                chunk = self.process.stdout.read(4096)
+                if not chunk:
+                    if self.process.poll() is not None:
+                        raise RuntimeError(f"stereo capture exited ({self.process.returncode})")
+                    continue
+                left, right = stereo_levels(chunk)
+                self.left += (left - self.left) * 0.35
+                self.right += (right - self.right) * 0.35
+                self.direction, self.delta_db = stereo_direction(self.left, self.right)
+        except Exception as exc:
+            if not self.stop_event.is_set():
+                self.error = str(exc)
+                self.direction = "Error"
+        finally:
+            self.stop()
+
+
 class SoundTestApp:
     def __init__(self):
         pygame.init()
@@ -208,6 +319,12 @@ class SoundTestApp:
         self.sink_label = ""
         self.sink_detail = ""
         self.recorder: Recorder | None = None
+        self.stereo_monitor: StereoMonitor | None = None
+        self.stereo_source = ""
+        self.stereo_label = ""
+        self.stereo_detail = ""
+        self.balance_position = 0.0
+        self.balance_updated_at = time.monotonic()
         self.player: subprocess.Popen[bytes] | None = None
         self.refresh_devices()
         make_tone(TONE)
@@ -219,21 +336,23 @@ class SoundTestApp:
         gap = 10
         button_w = max(120, (self.width - margin * 2 - gap) // 2)
         button_h = 38
-        small_h = 30
-        y = max(260, self.height - margin - small_h - gap - button_h * 2 - gap * 2)
+        y = max(260, self.height - margin - button_h * 3 - gap * 2)
         left = margin
         right = margin + button_w + gap
         return [
             ("Record 5s", pygame.Rect(left, y, button_w, button_h), self.start_recording),
-            ("Stop", pygame.Rect(right, y, button_w, button_h), self.stop_all),
-            ("Play Rec", pygame.Rect(left, y + button_h + gap, button_w, button_h), self.play_recording),
-            ("Tone Test", pygame.Rect(right, y + button_h + gap, button_w, button_h), self.play_tone),
-            ("Refresh", pygame.Rect(left, y + (button_h + gap) * 2, button_w, small_h), self.refresh_devices),
-            ("Quit", pygame.Rect(right, y + (button_h + gap) * 2, button_w, small_h), self.quit),
+            ("L/R Mic", pygame.Rect(right, y, button_w, button_h), self.start_stereo_test),
+            ("Stop", pygame.Rect(left, y + button_h + gap, button_w, button_h), self.stop_all),
+            ("Play Rec", pygame.Rect(right, y + button_h + gap, button_w, button_h), self.play_recording),
+            ("Tone Test", pygame.Rect(left, y + (button_h + gap) * 2, button_w, button_h), self.play_tone),
+            ("Quit", pygame.Rect(right, y + (button_h + gap) * 2, button_w, button_h), self.quit),
         ]
 
     def refresh_devices(self) -> None:
         self.source, self.source_label, self.source_detail = audio_device("sources", "Input")
+        self.stereo_source, self.stereo_label, self.stereo_detail = audio_device(
+            "sources", "Stereo Input", require_stereo=True
+        )
         self.sink, self.sink_label, self.sink_detail = audio_device("sinks", "Output")
         volume_ok = self.set_test_volumes()
         if self.source and self.sink:
@@ -249,18 +368,39 @@ class SoundTestApp:
         if self.source:
             ok = run_quiet(["pactl", "set-source-mute", self.source, "0"]) and ok
             ok = run_quiet(["pactl", "set-source-volume", self.source, "100%"]) and ok
+        if self.stereo_source and self.stereo_source != self.source:
+            ok = run_quiet(["pactl", "set-source-mute", self.stereo_source, "0"]) and ok
+            ok = run_quiet(["pactl", "set-source-volume", self.stereo_source, "100%"]) and ok
         return ok
 
     def start_recording(self) -> None:
         self.stop_player()
+        self.stop_stereo_test()
         self.set_test_volumes()
         self.recorder = Recorder(self.source)
         self.recorder.start()
         self.status = "Recording from Whisplay input at 100%"
 
+    def start_stereo_test(self) -> None:
+        if self.recorder:
+            self.recorder.stop()
+        self.stop_player()
+        self.set_test_volumes()
+        self.stereo_monitor = StereoMonitor(self.stereo_source)
+        self.stereo_monitor.start()
+        if self.stereo_monitor.error:
+            self.status = self.stereo_monitor.error
+        else:
+            self.status = "Speak from the left or right side"
+
+    def stop_stereo_test(self) -> None:
+        if self.stereo_monitor:
+            self.stereo_monitor.stop()
+
     def stop_all(self) -> None:
         if self.recorder:
             self.recorder.stop()
+        self.stop_stereo_test()
         self.stop_player()
         self.status = "Stopped"
 
@@ -309,6 +449,10 @@ class SoundTestApp:
                         self.play_recording()
                     elif event.key == pygame.K_t:
                         self.play_tone()
+                    elif event.key == pygame.K_l:
+                        self.start_stereo_test()
+                    elif event.key == pygame.K_F5:
+                        self.refresh_devices()
                 elif event.type == pygame.VIDEORESIZE:
                     self.width, self.height = self.screen.get_size()
                     self.buttons = self.layout_buttons()
@@ -335,11 +479,24 @@ class SoundTestApp:
             self.player = None
             if self.status.startswith("Playing"):
                 self.status = "Playback finished"
+        if self.stereo_monitor and self.stereo_monitor.error:
+            self.status = f"Stereo error: {self.stereo_monitor.error}"
+
+    def smooth_balance(self, target: float) -> float:
+        now = time.monotonic()
+        dt = min(0.1, max(0.0, now - self.balance_updated_at))
+        self.balance_updated_at = now
+        alpha = 1.0 - math.exp(-dt / STEREO_BALANCE_SMOOTH_SECONDS)
+        self.balance_position += (target - self.balance_position) * alpha
+        if abs(self.balance_position - target) < 0.001:
+            self.balance_position = target
+        return self.balance_position
 
     def draw(self) -> None:
         self.screen.fill(BG)
         self.width, self.height = self.screen.get_size()
-        content_w = min(324, self.width - 36)
+        content_x = 18
+        content_w = self.width - content_x * 2
         meter_w = max(80, content_w - 32)
         center_x = self.width // 2
 
@@ -348,13 +505,13 @@ class SoundTestApp:
         status_color = ERROR if "error" in self.status.lower() or "missing" in self.status.lower() else TEXT
         self.text(self.fit(self.status, 36), 20, 64, self.small_font, status_color)
 
-        self.panel(18, 88, content_w, 66)
+        self.panel(content_x, 88, content_w, 66)
         self.text("In", 32, 101, self.small_font, MUTED)
-        self.text(self.fit(self.source_label or "not found", 26), 66, 101, self.small_font, TEXT)
+        self.text(self.fit(self.source_label or "not found", 42), 66, 101, self.small_font, TEXT)
         self.text("Out", 32, 127, self.small_font, MUTED)
-        self.text(self.fit(self.sink_label or "not found", 25), 66, 127, self.small_font, TEXT)
+        self.text(self.fit(self.sink_label or "not found", 41), 66, 127, self.small_font, TEXT)
 
-        self.panel(18, 166, content_w, 84)
+        self.panel(content_x, 166, content_w, 84)
         active = bool(self.recorder and self.recorder.active)
         level = self.recorder.level if self.recorder else 0.0
         elapsed = time.time() - self.recorder.started_at if active and self.recorder else 0.0
@@ -371,8 +528,59 @@ class SoundTestApp:
         tail = f"{remaining:0.1f}s left" if active else f"last {rec_dur:0.1f}s / {rec_size // 1024} KB"
         self.center(tail, (center_x, 247), self.small_font, MUTED)
 
+        stereo_y = 262
+        stereo_bottom = self.buttons[0][1].top - 10
+        stereo_h = max(116, stereo_bottom - stereo_y)
+        self.panel(content_x, stereo_y, content_w, stereo_h)
+        monitor = self.stereo_monitor
+        left = monitor.left if monitor else 0.0
+        right = monitor.right if monitor else 0.0
+        direction = monitor.direction if monitor else "Press L/R Mic"
+        delta_db = monitor.delta_db if monitor else 0.0
+        stereo_active = bool(monitor and monitor.active)
+        self.text("Stereo source direction", 32, stereo_y + 12, self.body_font, ACCENT if stereo_active else TEXT)
+        verdict_color = ACCENT if direction in ("LEFT", "RIGHT") else TEXT
+        verdict = f"{direction}   L-R {delta_db:+.1f} dB" if stereo_active else direction
+        self.center(verdict, (center_x, stereo_y + 44), self.body_font, verdict_color)
+
+        # Spirit-level style balance indicator. Positive L-R dB moves the
+        # bubble left; negative values move it right. +/-6 dB reaches an end
+        # so modest left/right differences produce an obvious movement.
+        track_x = content_x + 38
+        track_w = content_w - 76
+        track_y = stereo_y + 72
+        track_h = 24
+        track_center = track_x + track_w // 2
+        pygame.draw.rect(self.screen, (15, 20, 27), (track_x, track_y, track_w, track_h), border_radius=track_h // 2)
+        pygame.draw.rect(self.screen, LINE, (track_x, track_y, track_w, track_h), 2, border_radius=track_h // 2)
+        for fraction in (-0.5, 0.0, 0.5):
+            tick_x = round(track_center + fraction * track_w)
+            tick_h = 17 if fraction == 0.0 else 10
+            pygame.draw.line(
+                self.screen,
+                ACCENT if fraction == 0.0 else LINE,
+                (tick_x, track_y + (track_h - tick_h) // 2),
+                (tick_x, track_y + (track_h + tick_h) // 2),
+                2,
+            )
+        self.text("L", content_x + 16, track_y + 1, self.body_font, BLUE)
+        self.text("R", content_x + content_w - 30, track_y + 1, self.body_font, WARN)
+
+        balance_target = max(-1.0, min(1.0, -delta_db / STEREO_BALANCE_RANGE_DB)) if stereo_active else 0.0
+        balance = self.smooth_balance(balance_target)
+        bubble_x = round(track_center + balance * (track_w / 2 - 13))
+        bubble_color = BLUE if direction == "LEFT" else WARN if direction == "RIGHT" else ACCENT if stereo_active else MUTED
+        pygame.draw.circle(self.screen, (8, 11, 16), (bubble_x, track_y + track_h // 2), 14)
+        pygame.draw.circle(self.screen, bubble_color, (bubble_x, track_y + track_h // 2), 11)
+        pygame.draw.circle(self.screen, (235, 248, 255), (bubble_x - 3, track_y + 8), 3)
+
+        levels = f"L {int(left * 100):02d}%     R {int(right * 100):02d}%"
+        self.center(levels, (center_x, stereo_y + 116), self.small_font, TEXT)
+        if stereo_h >= 160:
+            self.center(self.fit(self.stereo_label or "stereo input not found", 48), (center_x, stereo_y + 145), self.small_font, MUTED)
+
         for label, rect, _ in self.buttons:
-            color = ACCENT if label == "Record 5s" else PANEL_2
+            color = ACCENT if label in ("Record 5s", "L/R Mic") else PANEL_2
             if label == "Stop":
                 color = (80, 50, 55)
             pygame.draw.rect(self.screen, color, rect, border_radius=8)
