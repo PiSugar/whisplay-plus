@@ -107,7 +107,7 @@ class HatPlusDemo:
 
         self.gpio = None
         self.gpio_error = ""
-        self.led_index = 0
+        self.led_index = 4
         self.button_test_active = False
         self.button_test_count = 0
         self.last_button_state = False
