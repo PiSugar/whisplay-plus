@@ -15,9 +15,9 @@
 #include "../sensors/sensors.dtsi"
 
 	/*
-	 * Grove Port.X interface select. Keep the line logically asserted:
-	 * active high produces a physical high level (I2C, the default), while
-	 * the port_x_uart override changes it to active low (physical low).
+	 * Grove Port.X interface select: physical low selects I2C (the default),
+	 * while physical high selects UART. The port_x_uart override toggles the
+	 * GPIO polarity so that the logical low becomes a physical high.
 	 */
 	fragment@11 {
 		target = <&gpio>;
@@ -26,7 +26,7 @@
 			port_x_select: port-x-select {
 				gpio-hog;
 				gpios = <27 0>;
-				output-high;
+				output-low;
 				line-name = "grove-port-x-select";
 			};
 		};

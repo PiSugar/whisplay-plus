@@ -13,7 +13,7 @@ Whisplay Hat+ driver project for Raspberry Pi OS Desktop. It bundles the existin
 | Magnetometer | QMC6309, I2C1 address `0x7c`, expected ID `0x90` |
 | RGB LED | Same physical pins as Whisplay runtime: BOARD `22/18/16` |
 | Button | Same physical pin as Whisplay runtime: BOARD `11`, pressed = high |
-| Grove Port.X | I2C / UART, selected by BOARD `13` (GPIO27): low = UART, high = I2C |
+| Grove Port.X | I2C / UART, selected by BOARD `13` (GPIO27): low = I2C, high = UART |
 
 Sensor coordinate frames:
 
@@ -30,7 +30,7 @@ Display/touch GPIO mapping:
 | Backlight enable | GPIO22, active high by default |
 | Touch reset | GPIO6 |
 | Touch IRQ | GPIO13, falling edge |
-| Grove Port.X mode select | GPIO27 (BOARD pin 13): low = UART, high = I2C |
+| Grove Port.X mode select | GPIO27 (BOARD pin 13): low = I2C, high = UART |
 
 ## Layout
 
@@ -94,7 +94,7 @@ If the overlay is loaded automatically from the HAT EEPROM, add
 
 ### Grove Port.X mode
 
-The overlay drives GPIO27 (BOARD pin 13) high by default, selecting I2C on
+The overlay drives GPIO27 (BOARD pin 13) low (`0`) by default, selecting I2C on
 Grove Port.X:
 
 ```ini
@@ -102,7 +102,7 @@ dtoverlay=whisplay-plus
 ```
 
 Select UART by adding the `port_x_uart` parameter. This makes GPIO27 output a
-physical low level:
+physical high level (`1`):
 
 ```ini
 dtoverlay=whisplay-plus,port_x_uart
