@@ -8,7 +8,7 @@
 /plugin/;
 
 / {
-	compatible = "brcm,bcm2712";
+	compatible = "brcm,bcm2837", "brcm,bcm2711", "brcm,bcm2712";
 
 #include "../display/dts/display.dtsi"
 #include "../sound/dts/sound.dtsi"

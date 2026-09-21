@@ -1,6 +1,6 @@
-# Whisplay Hat+ Driver for Raspberry Pi 5
+# Whisplay Hat+ Driver for Raspberry Pi 3B/4B/5
 
-Whisplay Hat+ driver project for Raspberry Pi OS Desktop. It bundles the existing 2.8 inch MIPI-DSI display/touch driver with the Whisplay Sound card driver and a desktop demo that verifies display, touch, speaker, microphone, RGB LED, button, QMI8658B IMU and QMC6309 magnetometer.
+Whisplay Hat+ driver project for Raspberry Pi OS Desktop on Raspberry Pi 3B/3B+, 4B and 5 (including CM5). It bundles the existing 2.8 inch MIPI-DSI display/touch driver with the Whisplay Sound card driver and a desktop demo that verifies display, touch, speaker, microphone, RGB LED, button, QMI8658B IMU and QMC6309 magnetometer.
 
 ## Hardware
 
@@ -59,6 +59,10 @@ sudo bash install.sh
 sudo reboot
 ```
 
+The installer automatically detects the Raspberry Pi model. Pi 3B/3B+ and Pi
+4B use their physical DSI1 connector (`display_dsi=1`); Pi 5/CM5 keeps the
+existing DSI0 default.
+
 The installer:
 
 - installs build/runtime dependencies;
@@ -66,14 +70,17 @@ The installer:
 - builds `snd-soc-whisplay-soundcard.ko`;
 - builds and installs the aggregate `whisplay-plus.dtbo`;
 - enables `i2c_arm`, `i2s` and `spi`;
-- adds `dtoverlay=whisplay-plus` to `/boot/firmware/config.txt`;
+- adds the model-appropriate `dtoverlay=whisplay-plus` line to the boot
+  `config.txt` (`display_dsi=1` is added automatically on Pi 3/4);
 - disables Labwc mouse emulation for the GT911 so browser test apps receive
   independent multi-touch contacts;
 - installs the desktop demo to `/opt/whisplay-hat-plus`.
 
-`whisplay-plus` defaults to DSI0. If a HAT EEPROM auto-loads
-`whisplay-plus.dtbo` and the display is connected to DSI1, add this near the
-top of `/boot/firmware/config.txt`, before any other `dtoverlay=` line:
+`whisplay-plus` defaults to DSI0 internally. The installer automatically adds
+`display_dsi=1` on Pi 3B/3B+ and Pi 4B because their physical display connector
+uses DSI1. If a HAT EEPROM auto-loads `whisplay-plus.dtbo` on one of those
+models, add this near the top of the boot `config.txt`, before any other
+`dtoverlay=` line:
 
 ```ini
 dtparam=display_dsi=1

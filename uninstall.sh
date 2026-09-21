@@ -5,7 +5,15 @@ set -e
 HAT_OVERLAY="whisplay-plus"
 DISPLAY_MODULE="st7701p_pisugar"
 SOUND_MODULE="snd-soc-whisplay-soundcard"
-CONFIG="/boot/firmware/config.txt"
+if [ -f /boot/firmware/config.txt ]; then
+    CONFIG="/boot/firmware/config.txt"
+elif [ -f /boot/config.txt ]; then
+    CONFIG="/boot/config.txt"
+else
+    echo "ERROR: cannot find Raspberry Pi boot config.txt." >&2
+    exit 1
+fi
+BOOT_DIR="$(dirname "$CONFIG")"
 
 echo "=== Whisplay Hat+ Driver Uninstaller ==="
 
@@ -18,7 +26,7 @@ rm -f /etc/modules-load.d/whisplay-hat-plus.conf
 depmod -a
 
 # Remove overlay
-rm -f /boot/firmware/overlays/${HAT_OVERLAY}.dtbo
+rm -f "${BOOT_DIR}/overlays/${HAT_OVERLAY}.dtbo"
 
 # Remove config.txt entry
 sed -i "/^dtoverlay=${HAT_OVERLAY}/d" "$CONFIG"

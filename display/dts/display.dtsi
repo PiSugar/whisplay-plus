@@ -2,7 +2,11 @@
  * Whisplay Hat+ display/touch overlay fragments.
  *
  * Default path: DSI0 + i2c_csi_dsi0.
- * Optional path: DSI1 + i2c_csi_dsi1, enabled by display_dsi=1.
+ * Optional path: DSI1 + i2c_csi_dsi, enabled by display_dsi=1.
+ *
+ * i2c_csi_dsi is the DSI1 control bus symbol shared by the Raspberry Pi
+ * 3/4/5 base device trees. Pi 5 also exposes the same node through the
+ * i2c_csi_dsi1 alias, but using the common symbol keeps this overlay portable.
  */
 
 /* DSI0 display panel */
@@ -131,7 +135,7 @@ fragment@4 {
 
 /* DSI1 GT911 touch */
 fragment@5 {
-	target = <&i2c_csi_dsi1>;
+	target = <&i2c_csi_dsi>;
 	__dormant__ {
 		status = "okay";
 		#address-cells = <1>;

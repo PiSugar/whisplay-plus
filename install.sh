@@ -1,14 +1,84 @@
 #!/bin/bash
 # Whisplay Hat+ Driver Installer
-# Run on Raspberry Pi 5 with: sudo bash install.sh
+# Run on Raspberry Pi 3B/3B+, 4B or 5 with: sudo bash install.sh
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HAT_OVERLAY="whisplay-plus"
 DISPLAY_MODULE="st7701p_pisugar"
 SOUND_MODULE="snd-soc-whisplay-soundcard"
-CONFIG="/boot/firmware/config.txt"
 MODEL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null || true)"
+CONFIG=""
+BOOT_DIR=""
+OVERLAY_DIR=""
+PLATFORM=""
+DISPLAY_DSI="0"
+
+detect_platform() {
+    case "$MODEL" in
+        *"Raspberry Pi 3 Model B"*)
+            PLATFORM="Raspberry Pi 3B/3B+"
+            DISPLAY_DSI="1"
+            ;;
+        *"Raspberry Pi 4 Model B"*)
+            PLATFORM="Raspberry Pi 4B"
+            DISPLAY_DSI="1"
+            ;;
+        *"Raspberry Pi 5"*|*"Compute Module 5"*)
+            PLATFORM="Raspberry Pi 5/CM5"
+            DISPLAY_DSI="0"
+            ;;
+        *)
+            echo "ERROR: unsupported Raspberry Pi model: ${MODEL:-unknown}" >&2
+            echo "Supported models: Raspberry Pi 3B/3B+, 4B, 5 and Compute Module 5." >&2
+            exit 1
+            ;;
+    esac
+
+    if [ -f /boot/firmware/config.txt ]; then
+        CONFIG="/boot/firmware/config.txt"
+    elif [ -f /boot/config.txt ]; then
+        CONFIG="/boot/config.txt"
+    else
+        echo "ERROR: cannot find Raspberry Pi boot config.txt." >&2
+        exit 1
+    fi
+
+    BOOT_DIR="$(dirname "$CONFIG")"
+    OVERLAY_DIR="${BOOT_DIR}/overlays"
+}
+
+configure_overlay_line() {
+    local overlay_line="dtoverlay=${HAT_OVERLAY}"
+
+    if [ "$DISPLAY_DSI" = "1" ]; then
+        overlay_line="${overlay_line},display_dsi=1"
+    fi
+
+    if ! grep -Eq "^dtoverlay=${HAT_OVERLAY}(,|$)" "$CONFIG"; then
+        if grep -q "^\[all\]" "$CONFIG"; then
+            sed -i "/^\[all\]/a ${overlay_line}" "$CONFIG"
+        else
+            echo "$overlay_line" >> "$CONFIG"
+        fi
+        echo "  Added ${overlay_line} to config.txt"
+        return
+    fi
+
+    if [ "$DISPLAY_DSI" = "1" ]; then
+        if grep -Eq "^dtoverlay=${HAT_OVERLAY},.*display_dsi=" "$CONFIG"; then
+            sed -i -E "/^dtoverlay=${HAT_OVERLAY}(,|$)/ s/display_dsi=[^,[:space:]]+/display_dsi=1/g" \
+                "$CONFIG"
+        else
+            sed -i "/^dtoverlay=${HAT_OVERLAY}$/ s/$/,display_dsi=1/" "$CONFIG"
+            sed -i "/^dtoverlay=${HAT_OVERLAY},/ { /display_dsi=/! s/$/,display_dsi=1/; }" \
+                "$CONFIG"
+        fi
+        echo "  Configured ${HAT_OVERLAY} for the Pi 3/4 DSI1 connector."
+    else
+        echo "  dtoverlay=${HAT_OVERLAY} already in config.txt"
+    fi
+}
 
 configure_labwc_multitouch() {
     local system_config="/etc/xdg/labwc/rc.xml"
@@ -68,14 +138,13 @@ EOF
 
 echo "=== Whisplay Hat+ Driver Installer ==="
 
-# Whisplay Hat+ defaults to DSI0. If HAT EEPROM auto-loads this overlay and
-# the display is connected to DSI1, add this before other overlays in config.txt:
-#   dtparam=display_dsi=1
-if echo "$MODEL" | grep -Eq "Raspberry Pi 5|Compute Module 5"; then
-    echo "Detected platform: $MODEL"
+detect_platform
+echo "Detected platform: $MODEL"
+if [ "$DISPLAY_DSI" = "1" ]; then
+    echo "Display/touch path: DSI1 (automatic for ${PLATFORM})."
+else
+    echo "Display/touch path: DSI0 (default for ${PLATFORM})."
 fi
-
-echo "Display/touch overlay default: DSI0. Use dtparam=display_dsi=1 for DSI1."
 
 # 1. Install build dependencies
 echo "[1/6] Installing build dependencies..."
@@ -151,7 +220,7 @@ cpp -nostdinc -I /usr/src/linux-headers-$(uname -r | sed 's/-v8.*/-common-rpi/;s
 cpp -nostdinc -I /usr/src/linux-headers-*-common-rpi/include \
     -undef -x assembler-with-cpp ${HAT_OVERLAY}.dts | \
     dtc -@ -I dts -O dtb -o ${HAT_OVERLAY}.dtbo -
-cp ${HAT_OVERLAY}.dtbo /boot/firmware/overlays/
+install -m 644 ${HAT_OVERLAY}.dtbo "${OVERLAY_DIR}/"
 
 # 5. Configure config.txt
 echo "[5/6] Configuring boot parameters..."
@@ -161,16 +230,7 @@ for param in i2c_arm=on i2s=on spi=on; do
     fi
 done
 
-if ! grep -q "^dtoverlay=${HAT_OVERLAY}" "$CONFIG"; then
-    if grep -q "^\[all\]" "$CONFIG"; then
-        sed -i "/^\[all\]/a dtoverlay=${HAT_OVERLAY}" "$CONFIG"
-    else
-        echo "dtoverlay=${HAT_OVERLAY}" >> "$CONFIG"
-    fi
-    echo "  Added dtoverlay=${HAT_OVERLAY} to config.txt"
-else
-    echo "  dtoverlay=${HAT_OVERLAY} already in config.txt"
-fi
+configure_overlay_line
 
 sed -i '/^dtoverlay=pisugar-st7701p/d' "$CONFIG" 2>/dev/null || true
 sed -i '/^dtoverlay=whisplay-soundcard/d' "$CONFIG" 2>/dev/null || true
