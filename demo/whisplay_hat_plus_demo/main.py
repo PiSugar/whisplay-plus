@@ -25,7 +25,7 @@ except ImportError:
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "sensors"))
-from whisplay_sensors import QMC6309, QMI8658B  # noqa: E402
+from whisplay_sensors import MQC5883P, QMI8658B  # noqa: E402
 
 
 BG = (12, 15, 20)
@@ -136,7 +136,7 @@ class HatPlusDemo:
         try:
             self.bus = SMBus(1)
             self.qmi = QMI8658B(self.bus)
-            self.qmc = QMC6309(self.bus)
+            self.qmc = MQC5883P(self.bus)
         except Exception as exc:
             self.imu_error = str(exc)
             self.mag_error = str(exc)
@@ -496,7 +496,7 @@ class HatPlusDemo:
     def draw_mag_panel(self, x, y, w, h, mag) -> None:
         self.panel(x, y, w, h)
         self.mag_direction_buttons = []
-        self.text("QMC6309", x + 12, y + 10, self.body_font, GREEN if mag else RED)
+        self.text("MQC5883P", x + 12, y + 10, self.body_font, GREEN if mag else RED)
         if mag:
             mx, my, mz, heading, status, strength = mag
             self.text(f"mag {mx:+.0f} {my:+.0f} {mz:+.0f}", x + 12, y + 38, self.small_font, TEXT)

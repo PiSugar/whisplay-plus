@@ -38,24 +38,18 @@ if os.path.isdir(VENDOR_DIR) and VENDOR_DIR not in sys.path:
 
 BUS_ID = int(os.environ.get("WHISPLAY_I2C_BUS", "1"), 0)
 QMI_ADDR = int(os.environ.get("QMI8658_ADDR", "0x6b"), 0)
-QMC_ADDR = os.environ.get("QMC6309_ADDR")
-QMC_ADDR_CANDIDATES = [int(QMC_ADDR, 0)] if QMC_ADDR else [0x7C, 0x2C, 0x3E, 0x1C, 0x0D]
+MQC_ADDR = int(os.environ.get("MQC5883P_ADDR", "0x2c"), 0)
 CALIBRATION_PATH = os.environ.get(
     "WHISPLAY_GYRO_CALIBRATION",
     os.path.expanduser("~/.config/whisplay-gyro-test/calibration.json"),
 )
-CALIBRATION_VERSION = 8
+CALIBRATION_VERSION = 9
 DEFAULT_CALIBRATION = {
-    "version": 8,
-    "mag_offsets": (-4128.474341687479, 9528.74242627091, 4480.956747802015),
-    "mag_scales": (1.1431680277716745, 1.0386451143748543, 0.8602556112088884),
-    "mag_heading_offset": 270.3763000231354,
-    "mag_tumble_extent": {
-        "count": 511,
-        "max": (-2868.4136268730344, 10915.607970903051, 6155.413855036414),
-        "min": (-5388.5350565019235, 8141.876881638768, 2806.499640567616),
-        "span": (2520.121429628889, 2773.7310892642827, 3348.914214468798),
-    },
+    "version": 9,
+    "mag_offsets": (0.0, 0.0, 0.0),
+    "mag_scales": (1.0, 1.0, 1.0),
+    "mag_heading_offset": 0.0,
+    "mag_tumble_extent": {},
 }
 DEFAULT_CALIBRATION_PATH = PROJECT_ROOT / "demo" / "whisplay_hat_plus_demo" / "default_gyro_calibration.json"
 try:
@@ -310,17 +304,22 @@ class QMI8658B:
         )
 
 
-class QMC6309:
+class MQC5883P:
     def __init__(self, bus: SMBus, addr: int):
         self.bus = bus
         self.addr = addr
         self.chip_id = self.bus.read_byte_data(addr, 0x00)
-        if self.chip_id != 0x90:
-            raise RuntimeError(f"CHIP_ID=0x{self.chip_id:02x}, expected 0x90")
-        # Normal mode, high oversampling; 200 Hz ODR, +/-8 gauss range.
-        self.bus.write_byte_data(addr, 0x0A, 0xC9)
-        self.bus.write_byte_data(addr, 0x0B, 0x48)
-        time.sleep(0.05)
+        if self.chip_id != 0x80:
+            raise RuntimeError(f"CHIP_ID=0x{self.chip_id:02x}, expected 0x80")
+        # Required vendor setup, then continuous 200 Hz conversion at +/-8 gauss.
+        self.bus.write_byte_data(addr, 0x0D, 0x40)
+        time.sleep(0.01)
+        self.bus.write_byte_data(addr, 0x29, 0x06)
+        time.sleep(0.01)
+        self.bus.write_byte_data(addr, 0x0A, 0xCF)
+        time.sleep(0.01)
+        self.bus.write_byte_data(addr, 0x0B, 0x08)
+        time.sleep(0.02)
 
     def read(self) -> tuple[float, float, float, float, int]:
         status = self.bus.read_byte_data(self.addr, 0x09)
@@ -640,7 +639,7 @@ class GyroTestApp:
         self.qr_font = pygame.font.SysFont("DejaVu Sans", 10, bold=True)
         self.bus = SMBus(BUS_ID)
         self.qmi: QMI8658B | None = None
-        self.qmc: QMC6309 | None = None
+        self.qmc: MQC5883P | None = None
         self.qmi_error = ""
         self.qmc_error = ""
         self.qmi_filter = LowPass(0.22)
@@ -737,15 +736,7 @@ class GyroTestApp:
             self.qmi = None
             self.qmi_error = str(exc)
         try:
-            errors = []
-            for addr in QMC_ADDR_CANDIDATES:
-                try:
-                    self.qmc = QMC6309(self.bus, addr)
-                    break
-                except Exception as exc:
-                    errors.append(f"0x{addr:02x}: {exc}")
-            if not self.qmc:
-                raise RuntimeError("; ".join(errors))
+            self.qmc = MQC5883P(self.bus, MQC_ADDR)
             self.qmc_error = ""
         except Exception as exc:
             self.qmc = None
@@ -1399,7 +1390,7 @@ class GyroTestApp:
         self.screen.fill(BG)
         self.modal_buttons = []
         self.text("Whisplay GYRO Test", 18, 14, self.title_font, TEXT)
-        self.text("QMI8658B IMU / QMC6309 Magnetometer", 20, 44, self.small_font, MUTED)
+        self.text("QMI8658B IMU / MQC5883P Magnetometer", 20, 44, self.small_font, MUTED)
 
         left = 18
         top = 76
@@ -1422,7 +1413,7 @@ class GyroTestApp:
         self.mag_direction_buttons = []
         if mag:
             mx, my, mz, heading, status, strength = mag
-            self.text(f"QMC6309 0x{self.qmc.addr:02x}", left + 14, mag_top + 12, self.body_font, BLUE)
+            self.text(f"MQC5883P 0x{self.qmc.addr:02x}", left + 14, mag_top + 12, self.body_font, BLUE)
             self.row("MAG cal", f"X {mx:+.0f}   Y {my:+.0f}   Z {mz:+.0f}", left + 14, mag_top + 42)
             self.row("Heading", f"{heading:05.1f} deg   status 0x{int(status):02x}", left + 14, mag_top + 68)
             if self.mag_calibrating:
@@ -1468,7 +1459,7 @@ class GyroTestApp:
             self.text(f"|B| {strength:.0f}", self.width - 118, mag_top + 12, self.small_font, MUTED)
             self.draw_compass(heading, (self.width - 64, mag_top + 106), 34)
         else:
-            self.text("QMC6309 not ready", left + 14, mag_top + 18, self.body_font, RED)
+            self.text("MQC5883P not ready", left + 14, mag_top + 18, self.body_font, RED)
             self.text(self.fit(self.qmc_error, 38), left + 14, mag_top + 48, self.small_font, MUTED)
 
         for label, rect, _ in self.buttons:

@@ -1,7 +1,7 @@
 /*
  * Whisplay Hat+ sensor overlay fragments.
  *
- * The demo accesses QMI8658B/QMC6309 from user space, but the nodes document
+ * The demo accesses QMI8658B/MQC5883P from user space, but the nodes document
  * the fixed I2C1 addresses and allow future kernel drivers to bind.
  */
 
@@ -18,9 +18,9 @@ fragment@10 {
 			status = "okay";
 		};
 
-		qmc6309@7c {
-			compatible = "qst,qmc6309";
-			reg = <0x7c>;
+		mqc5883p@2c {
+			compatible = "qst,qmc5883p";
+			reg = <0x2c>;
 			status = "okay";
 		};
 	};

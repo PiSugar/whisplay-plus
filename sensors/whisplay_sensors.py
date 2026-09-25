@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 BUS_ID = 1
 QMI8658B_ADDR = 0x6B
-QMC6309_ADDR = 0x7C
+MQC5883P_ADDR = 0x2C
 
 
 def i16le(data: list[int] | bytes) -> tuple[int, ...]:
@@ -69,23 +69,31 @@ class QMI8658B:
         )
 
 
-class QMC6309:
-    def __init__(self, bus, addr: int = QMC6309_ADDR):
+class MQC5883P:
+    def __init__(self, bus, addr: int = MQC5883P_ADDR):
         self.bus = bus
         self.addr = addr
         self.chip_id = self.bus.read_byte_data(addr, 0x00)
-        if self.chip_id != 0x90:
-            raise RuntimeError(f"QMC6309 CHIP_ID=0x{self.chip_id:02x}, expected 0x90")
-        self.bus.write_byte_data(addr, 0x0A, 0xC9)
-        self.bus.write_byte_data(addr, 0x0B, 0x48)
-        time.sleep(0.05)
+        if self.chip_id != 0x80:
+            raise RuntimeError(f"MQC5883P CHIP_ID=0x{self.chip_id:02x}, expected 0x80")
+        # Required vendor setup, then continuous 200 Hz conversion at +/-8 gauss.
+        self.bus.write_byte_data(addr, 0x0D, 0x40)
+        time.sleep(0.01)
+        self.bus.write_byte_data(addr, 0x29, 0x06)
+        time.sleep(0.01)
+        self.bus.write_byte_data(addr, 0x0A, 0xCF)
+        time.sleep(0.01)
+        self.bus.write_byte_data(addr, 0x0B, 0x08)
+        time.sleep(0.02)
 
     def read(self, offsets: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> MagReading:
         status = self.bus.read_byte_data(self.addr, 0x09)
         x, y, z = i16le(self.bus.read_i2c_block_data(self.addr, 0x01, 6))
-        cx = x - offsets[0]
-        cy = y - offsets[1]
-        cz = z - offsets[2]
+        # Convert the sensor axes to screen X right, Y up, Z out.
+        sx, sy, sz = y, -x, z
+        cx = sx - offsets[0]
+        cy = sy - offsets[1]
+        cz = sz - offsets[2]
         heading = (math.degrees(math.atan2(cy, cx)) + 360.0) % 360.0
         strength = math.sqrt(cx * cx + cy * cy + cz * cz)
         return MagReading(int(cx), int(cy), int(cz), heading, status, strength)
@@ -99,12 +107,12 @@ def main() -> int:
 
     bus = SMBus(BUS_ID)
     qmi = QMI8658B(bus)
-    qmc = QMC6309(bus)
+    mqc = MQC5883P(bus)
     print(f"QMI8658B addr=0x{QMI8658B_ADDR:02x} id=0x{qmi.who_am_i:02x} rev=0x{qmi.revision:02x}")
-    print(f"QMC6309  addr=0x{QMC6309_ADDR:02x} id=0x{qmc.chip_id:02x}")
+    print(f"MQC5883P addr=0x{MQC5883P_ADDR:02x} id=0x{mqc.chip_id:02x}")
     for index in range(12):
         imu = qmi.read()
-        mag = qmc.read()
+        mag = mqc.read()
         acc_total = math.sqrt(imu.ax_g * imu.ax_g + imu.ay_g * imu.ay_g + imu.az_g * imu.az_g)
         print(
             f"{index:02d} acc={acc_total:.2f}g "
