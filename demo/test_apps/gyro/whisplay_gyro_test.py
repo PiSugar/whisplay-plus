@@ -24,7 +24,11 @@ PROJECT_ROOT = APP_DIR.parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from demo.whisplay_hat_plus_demo.gyro_map import GyroMap  # noqa: E402
+try:
+    from demo.whisplay_hat_plus_demo.gyro_map import GyroMap  # noqa: E402
+except ModuleNotFoundError:
+    # The Raspberry Pi image also ships this app as ~/whisplay-gyro-test.
+    from gyro_map import GyroMap  # type: ignore[no-redef]  # noqa: E402
 
 try:
     from smbus2 import SMBus
@@ -52,6 +56,8 @@ DEFAULT_CALIBRATION = {
     "mag_tumble_extent": {},
 }
 DEFAULT_CALIBRATION_PATH = PROJECT_ROOT / "demo" / "whisplay_hat_plus_demo" / "default_gyro_calibration.json"
+if not DEFAULT_CALIBRATION_PATH.is_file():
+    DEFAULT_CALIBRATION_PATH = APP_DIR / "default_gyro_calibration.json"
 try:
     with DEFAULT_CALIBRATION_PATH.open("r", encoding="utf-8") as handle:
         DEFAULT_CALIBRATION = json.load(handle)
