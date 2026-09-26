@@ -55,6 +55,11 @@ typedef struct {
     uint32_t tone_events;
     uint32_t record_events;
     uint32_t playback_events;
+    bool nfc_online;
+    bool grove_i2c;
+    bool nfc_card_present;
+    uint16_t nfc_atqa;
+    uint32_t nfc_events;
 } demo_state_t;
 
 void demo_ui_render(uint8_t *framebuffer, const demo_state_t *state);
@@ -62,3 +67,4 @@ bool demo_ui_hit_audio_record(uint16_t x, uint16_t y);
 bool demo_ui_hit_audio_play(uint16_t x, uint16_t y);
 bool demo_ui_hit_audio_mode(uint16_t x, uint16_t y);
 bool demo_ui_hit_rgb(uint16_t x, uint16_t y);
+bool demo_ui_hit_grove_mode(uint16_t x, uint16_t y);

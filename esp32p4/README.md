@@ -3,8 +3,9 @@
 This is a self-contained Metro-style hardware diagnostic for using the
 Whisplay Plus HAT on the Waveshare ESP32-P4-Module-DEV-KIT. It covers the
 ST7701P display, five-point GT911 touch, button, RGB LED, QMI8658B IMU,
-MQC5883P magnetometer, and switchable Whisplay ES8389 / onboard ES8311 audio
-paths. The current audio limitations are documented below.
+MQC5883P magnetometer, switchable Whisplay ES8389 / onboard ES8311 audio
+paths, and an optional M5Stack Unit NFC connected through Grove Port.X. The
+current audio limitations are documented below.
 
 The UI uses two synchronized RGB888 framebuffers in PSRAM, avoiding writes to
 the framebuffer currently being scanned by the DSI peripheral.
@@ -50,14 +51,41 @@ idf.py -p /dev/cu.usbmodem5C930067301 flash monitor
 Expected serial output includes an I2C scan. A fully connected Whisplay Plus
 should normally expose GT911 at `0x5d`, Whisplay ES8389 at `0x10`, the
 Waveshare onboard ES8311 at `0x18`, QMI8658B at `0x6b`, and MQC5883P at
-`0x2c`.
+`0x2c`. A connected M5Stack Unit NFC (ST25R3916) appears at `0x50`.
+
+## Grove I2C and M5Stack Unit NFC
+
+WhisPlay Plus multiplexes Grove Port.X between UART and the shared HAT I2C
+bus. HAT physical pin 13 maps to ESP32-P4 GPIO20: low selects I2C and high
+selects UART. This demo drives GPIO20 low before the I2C controller is created
+or scanned, so a Grove device is visible from the first transaction.
+
+When an ST25R3916-based M5Stack Unit NFC is present at address `0x50`, the demo
+validates its identity register, configures the RF frontend for ISO14443-A at
+106 kbit/s, turns on the reader field, and adds an `NFC / GROVE I2C` panel to
+the bottom of the Metro UI. The panel shows waiting/card-present state, ATQA,
+and a new-card event count. It is hidden when the module is absent.
+
+A newly presented card queues a 320 ms beep on the currently selected complete
+audio path (`HAT ES8389` or `BOARD ES8311`). A card held on the antenna produces
+only one event; it must be absent for twelve consecutive polls before presenting
+it again can produce another beep. Grove mode can be hot-switched from the
+always-visible button in the I/O tile; the NFC panel is removed in UART mode
+and probing resumes after switching back to I2C. The module can also be
+hot-plugged while I2C remains selected: sustained failed identity reads hide
+the panel and a later successful read reinitializes the reader and restores it.
+If recording or clip playback is active, one
+pending beep is retained and played as soon as that operation completes. The
+known ES8389/GPIO45 speaker limitation still applies—the demo does not redirect
+an ES8389 NFC beep through the board ES8311 output.
 
 ## Current audio status
 
-The Sound tile has two selectable modes. `HAT ES8389` is the default;
-`BOARD ES8311` switches the complete input and output path to the codec on the
-Waveshare development board. I2S channels are deleted and recreated during a
-switch because the two codecs use different buses and GPIO assignments.
+The Sound tile has two selectable modes. When the onboard codec initializes
+successfully, `BOARD ES8311` is the default; otherwise startup falls back to
+`HAT ES8389`. Selecting either tile switches the complete input and output path.
+I2S channels are deleted and recreated during a switch because the two codecs
+use different buses and GPIO assignments.
 
 | Mode | Microphone | Speaker | Current status |
 | --- | --- | --- | --- |
@@ -148,6 +176,8 @@ operated simultaneously without physically isolating `R52`.
 - The meter is live in both modes. A moving meter confirms capture only; it
   does not mark the speaker test as passed.
 - A missing MQC5883P is shown as `MISS` rather than treated as a fatal error.
+- With M5Stack Unit NFC attached to Grove Port.X, present an ISO14443-A card to
+  update the NFC panel and play a short beep through the selected codec.
 
 GPIOs and DSI lane rate can be changed under `Whisplay Plus hardware` in
 `idf.py menuconfig`.

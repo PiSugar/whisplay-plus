@@ -1410,7 +1410,8 @@ shutdown:
              audio->last_mic_raw_peak, audio->last_mic_level);
 }
 
-void whisplay_audio_play_tone(whisplay_audio_t *audio)
+static void play_tone_for(whisplay_audio_t *audio, uint32_t duration_ms,
+                          const char *description)
 {
     if (!audio->ready) return;
 
@@ -1448,6 +1449,10 @@ void whisplay_audio_play_tone(whisplay_audio_t *audio)
                                                 : start_whisplay_microphone(audio));
         return;
     }
+    // Give the codec analogue path and the NS4150B PA time to leave shutdown
+    // before counting the tone window. Short notification sounds otherwise
+    // finish while the amplifier is still settling even though PA_CTRL is high.
+    vTaskDelay(pdMS_TO_TICKS(120));
 
     audio_writer_context_t writer = {
         .audio = audio,
@@ -1458,9 +1463,10 @@ void whisplay_audio_play_tone(whisplay_audio_t *audio)
         ESP_LOGE(TAG, "audio test: failed to create tone task");
         writer.running = false;
     } else {
-        ESP_LOGI(TAG, "%s speaker test: stereo 1 kHz for 3 seconds",
-                 onboard ? "ES8311" : "ES8389");
-        vTaskDelay(pdMS_TO_TICKS(3000));
+        ESP_LOGI(TAG, "%s %s: stereo 1 kHz for %lu ms",
+                 onboard ? "ES8311" : "ES8389", description,
+                 (unsigned long)duration_ms);
+        vTaskDelay(pdMS_TO_TICKS(duration_ms));
         writer.running = false;
         for (int i = 0; i < 100 && !writer.stopped; ++i) vTaskDelay(pdMS_TO_TICKS(2));
     }
@@ -1488,4 +1494,14 @@ void whisplay_audio_play_tone(whisplay_audio_t *audio)
     audio->last_mic_raw_peak = peak;
     ESP_LOGI(TAG, "%s test complete: microphone restored, raw peak=%u level=%u%%",
              onboard ? "ES8311" : "ES8389", peak, audio->last_mic_level);
+}
+
+void whisplay_audio_play_tone(whisplay_audio_t *audio)
+{
+    play_tone_for(audio, 3000, "speaker test");
+}
+
+void whisplay_audio_play_beep(whisplay_audio_t *audio)
+{
+    play_tone_for(audio, 320, "NFC beep");
 }

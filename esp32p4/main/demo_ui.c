@@ -8,6 +8,11 @@
 
 #define W 480
 #define H 640
+#define PANEL_TITLE_SCALE 2
+#define STATUS_BADGE_W 43
+#define STATUS_BADGE_H 13
+#define STATUS_BADGE_RIGHT 8
+#define STATUS_BADGE_TOP 8
 
 typedef struct {
     uint8_t r, g, b;
@@ -188,13 +193,13 @@ static void panel(uint8_t *fb, int x, int y, int w, int h, color_t accent, const
     rect(fb, x, y, w, h, PANEL);
     rect(fb, x, y, 6, h, accent);
     rect(fb, x + 6, y, w - 6, 2, accent);
-    text(fb, x + 16, y + 12, title, 2, TEXT);
+    text(fb, x + 16, y + 12, title, PANEL_TITLE_SCALE, TEXT);
 }
 
 static void status(uint8_t *fb, int x, int y, bool ok)
 {
-    rect(fb, x, y, 57, 17, ok ? LIME : RED);
-    text(fb, x + 5, y + 2, ok ? "ONLINE" : "MISS", 1, BACKGROUND);
+    rect(fb, x, y, STATUS_BADGE_W, STATUS_BADGE_H, ok ? LIME : RED);
+    text(fb, x + (ok ? 4 : 10), y + 3, ok ? "ONLINE" : "MISS", 1, BACKGROUND);
 }
 
 static void status_panel(uint8_t *fb, int x, int y, int w, int h,
@@ -205,13 +210,9 @@ static void status_panel(uint8_t *fb, int x, int y, int w, int h,
     rect(fb, x, y, 6, h, accent);
     rect(fb, x + 6, y, w - 6, 2, accent);
 
-    const int badge_x = x + w - 72;
-    const int title_x = x + 16;
-    const int title_width_2x = (int)strlen(title) * 12 - 2;
-    const int title_scale = title_width_2x <= badge_x - title_x - 8 ? 2 : 1;
-    const int title_y = y + (title_scale == 2 ? 12 : 17);
-    text(fb, title_x, title_y, title, title_scale, TEXT);
-    status(fb, badge_x, y + 12, ok);
+    text(fb, x + 16, y + 12, title, PANEL_TITLE_SCALE, TEXT);
+    status(fb, x + w - STATUS_BADGE_RIGHT - STATUS_BADGE_W,
+           y + STATUS_BADGE_TOP, ok);
 }
 
 static int scaled(float value, float maximum, int width)
@@ -350,29 +351,48 @@ void demo_ui_render(uint8_t *fb, const demo_state_t *s)
     text(fb, 361, 389, s->button_pressed ? "PRESSED" : "BUTTON", 1, TEXT);
     static const char *rgb_names[] = {"OFF", "RED", "GREEN", "BLUE"};
     static const color_t rgb_colors[] = {MUTED, RED, LIME, BLUE};
-    rect(fb, 326, 420, 124, 34, s->rgb_pressed ? BLUE : PANEL_DARK);
+    rect(fb, 326, 420, 124, 28, s->rgb_pressed ? BLUE : PANEL_DARK);
     circle(fb, 343, 437, 9, rgb_colors[s->rgb_step & 3], true);
     text(fb, 361, 433, s->rgb_pressed ? "CLICK!" : rgb_names[s->rgb_step & 3], 1,
          s->rgb_pressed ? TEXT : rgb_colors[s->rgb_step & 3]);
-    text(fb, 326, 460, s->rgb_pressed ? "INPUT RECEIVED" : "TAP OR HAT KEY", 1,
-         s->rgb_pressed ? BLUE : MUTED);
+    rect(fb, 326, 451, 124, 18, s->grove_i2c ? CYAN : AMBER);
+    text(fb, 345, 456, s->grove_i2c ? "GROVE I2C" : "GROVE UART", 1, BACKGROUND);
 
-    panel(fb, 14, 482, 452, 144, CYAN, "SYSTEM CHECK");
-    checklist(fb, 31, 516, "DSI DISPLAY", s->display_ok, CYAN);
-    checklist(fb, 31, 536, "GT911 MULTITOUCH", s->touch_ok, MAGENTA);
-    checklist(fb, 31, 556, "ES8389 AUDIO", s->audio_ok, RED);
-    checklist(fb, 31, 576, "QMI8658B IMU", s->imu_ok, AMBER);
-    checklist(fb, 31, 596, "MQC5883P MAG", s->mag_ok, LIME);
-    snprintf(buffer, sizeof(buffer), "TOUCH %lu", (unsigned long)s->touch_events);
-    text(fb, 265, 520, buffer, 1, TEXT);
-    snprintf(buffer, sizeof(buffer), "BUTTON %lu", (unsigned long)s->button_events);
-    text(fb, 265, 540, buffer, 1, TEXT);
-    snprintf(buffer, sizeof(buffer), "REC %lu PLAY %lu", (unsigned long)s->record_events,
-             (unsigned long)s->playback_events);
-    text(fb, 265, 560, buffer, 1, TEXT);
-    text(fb, 265, 584, s->mag_ok ? "ALL SENSORS READY" : "MAG SENSOR MISSING", 1,
-         s->mag_ok ? LIME : RED);
-    text(fb, 265, 604, "MOVE / TOUCH / SPEAK", 1, CYAN);
+    if (s->nfc_online) {
+        status_panel(fb, 14, 482, 218, 144, AMBER, "NFC / GROVE", true);
+        text(fb, 31, 522, "M5 UNIT NFC", 2, AMBER);
+        rect(fb, 31, 550, 184, 33, s->nfc_card_present ? AMBER : PANEL_DARK);
+        text(fb, 47, 561, s->nfc_card_present ? "CARD DETECTED" : "WAITING FOR CARD", 1,
+             s->nfc_card_present ? BACKGROUND : MUTED);
+        snprintf(buffer, sizeof(buffer), "ATQA %04X / EVENTS %lu", s->nfc_atqa,
+                 (unsigned long)s->nfc_events);
+        text(fb, 31, 595, buffer, 1, s->nfc_card_present ? TEXT : MUTED);
+        text(fb, 31, 611, "ST25R3916 @ 0X50", 1, CYAN);
+
+        panel(fb, 242, 482, 224, 144, CYAN, "SYSTEM CHECK");
+        checklist(fb, 259, 516, "DSI DISPLAY", s->display_ok, CYAN);
+        checklist(fb, 259, 536, "GT911 TOUCH", s->touch_ok, MAGENTA);
+        checklist(fb, 259, 556, "DUAL AUDIO", s->audio_ok, RED);
+        checklist(fb, 259, 576, "QMI8658B IMU", s->imu_ok, AMBER);
+        checklist(fb, 259, 596, "MQC5883P MAG", s->mag_ok, LIME);
+    } else {
+        panel(fb, 14, 482, 452, 144, CYAN, "SYSTEM CHECK");
+        checklist(fb, 31, 516, "DSI DISPLAY", s->display_ok, CYAN);
+        checklist(fb, 31, 536, "GT911 MULTITOUCH", s->touch_ok, MAGENTA);
+        checklist(fb, 31, 556, "ES8389 AUDIO", s->audio_ok, RED);
+        checklist(fb, 31, 576, "QMI8658B IMU", s->imu_ok, AMBER);
+        checklist(fb, 31, 596, "MQC5883P MAG", s->mag_ok, LIME);
+        snprintf(buffer, sizeof(buffer), "TOUCH %lu", (unsigned long)s->touch_events);
+        text(fb, 265, 520, buffer, 1, TEXT);
+        snprintf(buffer, sizeof(buffer), "BUTTON %lu", (unsigned long)s->button_events);
+        text(fb, 265, 540, buffer, 1, TEXT);
+        snprintf(buffer, sizeof(buffer), "REC %lu PLAY %lu", (unsigned long)s->record_events,
+                 (unsigned long)s->playback_events);
+        text(fb, 265, 560, buffer, 1, TEXT);
+        text(fb, 265, 584, s->mag_ok ? "ALL SENSORS READY" : "MAG SENSOR MISSING", 1,
+             s->mag_ok ? LIME : RED);
+        text(fb, 265, 604, "MOVE / TOUCH / SPEAK", 1, CYAN);
+    }
 
     // Draw touch feedback last so it remains visible above every tile. Three
     // staggered rings create a short Metro-style water ripple at the exact
@@ -412,5 +432,10 @@ bool demo_ui_hit_audio_mode(uint16_t x, uint16_t y)
 
 bool demo_ui_hit_rgb(uint16_t x, uint16_t y)
 {
-    return x >= 310 && x < 466 && y >= 346 && y < 472;
+    return x >= 310 && x < 466 && y >= 346 && y < 450;
+}
+
+bool demo_ui_hit_grove_mode(uint16_t x, uint16_t y)
+{
+    return x >= 326 && x < 451 && y >= 449 && y < 472;
 }

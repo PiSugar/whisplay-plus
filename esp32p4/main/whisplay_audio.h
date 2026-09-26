@@ -38,6 +38,7 @@ typedef struct {
 esp_err_t whisplay_audio_init(i2c_master_bus_handle_t bus, whisplay_audio_t *audio);
 uint8_t whisplay_audio_read_mic_level(whisplay_audio_t *audio);
 void whisplay_audio_play_tone(whisplay_audio_t *audio);
+void whisplay_audio_play_beep(whisplay_audio_t *audio);
 esp_err_t whisplay_audio_record_10s(whisplay_audio_t *audio);
 esp_err_t whisplay_audio_play_recording(whisplay_audio_t *audio);
 bool whisplay_audio_has_recording(const whisplay_audio_t *audio);

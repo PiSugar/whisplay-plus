@@ -26,6 +26,7 @@
 #include "sdkconfig.h"
 #include "demo_ui.h"
 #include "whisplay_audio.h"
+#include "whisplay_nfc.h"
 #include "whisplay_sensors.h"
 
 #define LCD_H_RES 480
@@ -53,6 +54,7 @@ typedef enum {
     AUDIO_JOB_IDLE,
     AUDIO_JOB_RECORD,
     AUDIO_JOB_PLAY,
+    AUDIO_JOB_BEEP,
 } audio_job_kind_t;
 
 typedef struct {
@@ -66,9 +68,14 @@ static void audio_job_task(void *argument)
 {
     audio_job_t *job = argument;
     const audio_job_kind_t kind = job->kind;
-    job->result = kind == AUDIO_JOB_RECORD
-        ? whisplay_audio_record_10s(job->audio)
-        : whisplay_audio_play_recording(job->audio);
+    if (kind == AUDIO_JOB_RECORD) {
+        job->result = whisplay_audio_record_10s(job->audio);
+    } else if (kind == AUDIO_JOB_PLAY) {
+        job->result = whisplay_audio_play_recording(job->audio);
+    } else {
+        whisplay_audio_play_beep(job->audio);
+        job->result = ESP_OK;
+    }
     job->finished = true;
     vTaskDelete(NULL);
 }
@@ -81,7 +88,9 @@ static bool start_audio_job(audio_job_t *job, audio_job_kind_t kind)
     job->kind = kind;
     job->finished = false;
     job->result = ESP_OK;
-    if (xTaskCreate(audio_job_task, kind == AUDIO_JOB_RECORD ? "record_clip" : "play_clip",
+    const char *task_name = kind == AUDIO_JOB_RECORD ? "record_clip" :
+                            (kind == AUDIO_JOB_PLAY ? "play_clip" : "nfc_beep");
+    if (xTaskCreate(audio_job_task, task_name,
                     4096, job, 5, NULL) != pdPASS) {
         job->kind = AUDIO_JOB_IDLE;
         job->result = ESP_ERR_NO_MEM;
@@ -542,6 +551,14 @@ void app_main(void)
              CONFIG_WHISPLAY_TOUCH_RESET_GPIO, CONFIG_WHISPLAY_TOUCH_INT_GPIO,
              CONFIG_WHISPLAY_I2C_SDA_GPIO, CONFIG_WHISPLAY_I2C_SCL_GPIO);
 
+    // WhisPlay Plus Port.X is multiplexed between the shared HAT I2C bus and
+    // UART.  Select I2C before creating/scanning the bus so a Grove device is
+    // already connected when the first probe is sent.
+    ESP_ERROR_CHECK(configure_output(CONFIG_WHISPLAY_GROVE_SELECT_GPIO, 0));
+    vTaskDelay(pdMS_TO_TICKS(10));
+    ESP_LOGI(TAG, "Grove Port.X selected I2C mode on GPIO%d",
+             CONFIG_WHISPLAY_GROVE_SELECT_GPIO);
+
     ESP_ERROR_CHECK(reset_touch_controller());
     i2c_master_bus_handle_t i2c_bus = NULL;
     ESP_ERROR_CHECK(scan_i2c(&i2c_bus));
@@ -549,15 +566,24 @@ void app_main(void)
     ESP_ERROR_CHECK(initialize_touch(i2c_bus, &touch));
     ESP_ERROR_CHECK(initialize_controls());
 
+    whisplay_nfc_t nfc;
+    bool nfc_ok = whisplay_nfc_init(i2c_bus, &nfc) == ESP_OK;
+    if (!nfc_ok) {
+        whisplay_nfc_deinit(&nfc);
+        ESP_LOGI(TAG, "M5Stack Unit NFC not detected; NFC panel hidden");
+    }
+
     whisplay_sensors_t sensors;
     const bool imu_ok = whisplay_sensors_init(i2c_bus, &sensors) == ESP_OK;
     whisplay_audio_t audio;
     bool audio_ok = whisplay_audio_init(i2c_bus, &audio) == ESP_OK;
+    bool default_audio_onboard = false;
     if (audio_ok) {
-        ESP_LOGI(TAG, "probing onboard ES8311 microphone before returning to default ES8389");
-        audio_ok = whisplay_audio_set_onboard_codec(&audio, true) == ESP_OK;
+        ESP_LOGI(TAG, "probing onboard ES8311 as preferred default codec");
+        const bool onboard_ok = whisplay_audio_set_onboard_codec(&audio, true) == ESP_OK;
         uint16_t onboard_peak = 0;
-        if (audio_ok) {
+        if (onboard_ok) {
+            default_audio_onboard = true;
             vTaskDelay(pdMS_TO_TICKS(300));
             audio.last_mic_raw_peak = 0;
             for (int i = 0; i < 20; ++i) {
@@ -567,6 +593,9 @@ void app_main(void)
                 }
             }
             ESP_LOGI(TAG, "onboard ES8311 microphone probe raw peak=%u", onboard_peak);
+            ESP_LOGI(TAG, "onboard ES8311 selected as default audio codec");
+        } else {
+            ESP_LOGW(TAG, "onboard ES8311 unavailable; falling back to WhisPlay ES8389");
             audio_ok = whisplay_audio_set_onboard_codec(&audio, false) == ESP_OK;
         }
     }
@@ -582,6 +611,9 @@ void app_main(void)
         .audio_ok = audio_ok,
         .imu_ok = imu_ok,
         .mag_ok = sensors.mag_ok,
+        .nfc_online = nfc_ok,
+        .grove_i2c = true,
+        .audio_onboard = default_audio_onboard,
     };
     unsigned int back_buffer = 1;
     demo_ui_render(framebuffers[back_buffer], &state);
@@ -611,7 +643,11 @@ void app_main(void)
     TickType_t last_button_change = 0;
     TickType_t last_sensor_read = 0;
     TickType_t last_render = 0;
+    TickType_t last_nfc_poll = 0;
+    TickType_t last_nfc_probe = 0;
     bool touch_armed = true;
+    bool pending_nfc_beep = false;
+    uint8_t nfc_absent_probes = 0;
     audio_job_t audio_job = {
         .audio = &audio,
         .kind = AUDIO_JOB_IDLE,
@@ -638,12 +674,14 @@ void app_main(void)
             state.mic_level = audio.last_mic_level;
             state.audio_progress = completed_result == ESP_OK ? 100 : audio.operation_progress;
             if (completed_result != ESP_OK) {
-                ESP_LOGE(TAG, "%s job failed: %s",
-                         completed_kind == AUDIO_JOB_RECORD ? "recording" : "playback",
+                const char *completed_name = completed_kind == AUDIO_JOB_RECORD ? "recording" :
+                                             (completed_kind == AUDIO_JOB_PLAY ? "playback" : "NFC beep");
+                ESP_LOGE(TAG, "%s job failed: %s", completed_name,
                          esp_err_to_name(completed_result));
             } else {
-                ESP_LOGI(TAG, "%s job completed",
-                         completed_kind == AUDIO_JOB_RECORD ? "recording" : "playback");
+                const char *completed_name = completed_kind == AUDIO_JOB_RECORD ? "recording" :
+                                             (completed_kind == AUDIO_JOB_PLAY ? "playback" : "NFC beep");
+                ESP_LOGI(TAG, "%s job completed", completed_name);
             }
         }
         poll_touch(touch, &state);
@@ -666,11 +704,11 @@ void app_main(void)
             state.ripple_y = y;
             state.ripple_age = 0;
             ESP_LOGI(TAG,
-                     "touch down raw=(%u,%u) mapped=(%u,%u): record=%d play=%d mode=%d io=%d",
+                     "touch down raw=(%u,%u) mapped=(%u,%u): record=%d play=%d mode=%d rgb=%d grove=%d",
                      state.touches[0].raw_x, state.touches[0].raw_y, x, y,
                      demo_ui_hit_audio_record(x, y), demo_ui_hit_audio_play(x, y),
                      demo_ui_hit_audio_mode(x, y),
-                     demo_ui_hit_rgb(x, y));
+                     demo_ui_hit_rgb(x, y), demo_ui_hit_grove_mode(x, y));
             if (demo_ui_hit_audio_mode(x, y) && state.audio_ok &&
                 audio_job.kind == AUDIO_JOB_IDLE) {
                 state.audio_onboard = !state.audio_onboard;
@@ -717,6 +755,27 @@ void app_main(void)
                 demo_ui_render(framebuffers[back_buffer], &state);
                 ESP_ERROR_CHECK(display_present(panel, framebuffers[back_buffer]));
                 back_buffer ^= 1;
+            } else if (demo_ui_hit_grove_mode(x, y)) {
+                state.grove_i2c = !state.grove_i2c;
+                if (state.grove_i2c) {
+                    gpio_set_level(CONFIG_WHISPLAY_GROVE_SELECT_GPIO, 0);
+                    vTaskDelay(pdMS_TO_TICKS(10));
+                    last_nfc_probe = 0;
+                    ESP_LOGI(TAG, "Grove Port.X hot-switched to I2C");
+                } else {
+                    pending_nfc_beep = false;
+                    if (nfc_ok || nfc.device) whisplay_nfc_deinit(&nfc);
+                    nfc_ok = false;
+                    nfc_absent_probes = 0;
+                    state.nfc_online = false;
+                    state.nfc_card_present = false;
+                    state.nfc_atqa = 0;
+                    gpio_set_level(CONFIG_WHISPLAY_GROVE_SELECT_GPIO, 1);
+                    ESP_LOGI(TAG, "Grove Port.X hot-switched to UART");
+                }
+                demo_ui_render(framebuffers[back_buffer], &state);
+                ESP_ERROR_CHECK(display_present(panel, framebuffers[back_buffer]));
+                back_buffer ^= 1;
             } else if (demo_ui_hit_rgb(x, y)) {
                 state.rgb_step = (state.rgb_step + 1) % 4;
                 set_rgb(state.rgb_step);
@@ -730,6 +789,49 @@ void app_main(void)
 
         const int button = gpio_get_level(CONFIG_WHISPLAY_BUTTON_GPIO);
         const TickType_t now = xTaskGetTickCount();
+
+        const TickType_t probe_interval = pdMS_TO_TICKS(nfc_ok ? 150 : 500);
+        if (state.grove_i2c && now - last_nfc_probe >= probe_interval) {
+            last_nfc_probe = now;
+            if (nfc_ok) {
+                if (whisplay_nfc_is_connected(&nfc)) {
+                    nfc_absent_probes = 0;
+                } else if (++nfc_absent_probes >= 6) {
+                    ESP_LOGI(TAG, "M5Stack Unit NFC unplugged; hiding NFC panel");
+                    whisplay_nfc_deinit(&nfc);
+                    nfc_ok = false;
+                    nfc_absent_probes = 0;
+                    state.nfc_online = false;
+                    state.nfc_card_present = false;
+                    state.nfc_atqa = 0;
+                }
+            } else {
+                nfc_ok = whisplay_nfc_init(i2c_bus, &nfc) == ESP_OK;
+                if (nfc_ok) {
+                    state.nfc_online = true;
+                    ESP_LOGI(TAG, "M5Stack Unit NFC hot-plugged; showing NFC panel");
+                } else {
+                    whisplay_nfc_deinit(&nfc);
+                }
+            }
+        }
+        if (nfc_ok && now - last_nfc_poll >= pdMS_TO_TICKS(100)) {
+            last_nfc_poll = now;
+            if (whisplay_nfc_poll(&nfc)) {
+                pending_nfc_beep = true;
+            }
+            state.nfc_card_present = nfc.card_present;
+            state.nfc_atqa = nfc.atqa;
+            state.nfc_events = nfc.card_events;
+        }
+        if (pending_nfc_beep && state.audio_ok && audio_job.kind == AUDIO_JOB_IDLE) {
+            pending_nfc_beep = !start_audio_job(&audio_job, AUDIO_JOB_BEEP);
+            if (!pending_nfc_beep) {
+                ESP_LOGI(TAG, "NFC card beep queued on current %s codec",
+                         state.audio_onboard ? "ES8311" : "ES8389");
+            }
+        }
+
         if (button != last_button && now - last_button_change >= pdMS_TO_TICKS(30)) {
             last_button = button;
             last_button_change = now;

@@ -24,6 +24,10 @@ menu "Whisplay Plus hardware"
         int "I2C SCL GPIO"
         default 8
 
+    config WHISPLAY_GROVE_SELECT_GPIO
+        int "Grove Port.X I2C/UART select GPIO (low = I2C)"
+        default 20
+
     config WHISPLAY_BUTTON_GPIO
         int "Push button GPIO"
         default 21
