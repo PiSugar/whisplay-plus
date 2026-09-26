@@ -1,5 +1,8 @@
 # Whisplay Hat+ Driver for Raspberry Pi 3B/4B/5
 
+> ESP32-P4 work is tracked in [`esp32p4/`](esp32p4/README.md). The existing
+> Linux driver and installer below remain the Raspberry Pi implementation.
+
 Whisplay Hat+ driver project for Raspberry Pi OS Desktop on Raspberry Pi 3B/3B+, 4B and 5 (including CM5). It bundles the existing 2.8 inch MIPI-DSI display/touch driver with the Whisplay Sound card driver and a desktop demo that verifies display, touch, speaker, microphone, RGB LED, button, QMI8658B IMU and MQC5883P magnetometer.
 
 ## Hardware

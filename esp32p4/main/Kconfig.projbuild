@@ -1,0 +1,64 @@
+menu "Whisplay Plus hardware"
+
+    config WHISPLAY_PANEL_RESET_GPIO
+        int "Panel reset GPIO"
+        default 23
+
+    config WHISPLAY_BACKLIGHT_GPIO
+        int "Panel backlight GPIO"
+        default 6
+
+    config WHISPLAY_TOUCH_RESET_GPIO
+        int "GT911 reset GPIO"
+        default 26
+
+    config WHISPLAY_TOUCH_INT_GPIO
+        int "GT911 interrupt GPIO"
+        default 48
+
+    config WHISPLAY_I2C_SDA_GPIO
+        int "I2C SDA GPIO"
+        default 7
+
+    config WHISPLAY_I2C_SCL_GPIO
+        int "I2C SCL GPIO"
+        default 8
+
+    config WHISPLAY_BUTTON_GPIO
+        int "Push button GPIO"
+        default 21
+
+    config WHISPLAY_RGB_RED_GPIO
+        int "RGB LED red GPIO"
+        default 1
+
+    config WHISPLAY_RGB_GREEN_GPIO
+        int "RGB LED green GPIO"
+        default 4
+
+    config WHISPLAY_RGB_BLUE_GPIO
+        int "RGB LED blue GPIO"
+        default 5
+
+    config WHISPLAY_I2S_BCLK_GPIO
+        int "Whisplay Sound I2S bit-clock GPIO (HAT pin 12)"
+        default 22
+
+    config WHISPLAY_I2S_LRCLK_GPIO
+        int "Whisplay Sound I2S word-select GPIO (HAT pin 35)"
+        default 53
+
+    config WHISPLAY_I2S_DOUT_GPIO
+        int "Whisplay Sound I2S P4-to-codec GPIO (HAT pin 40)"
+        default 45
+
+    config WHISPLAY_I2S_DIN_GPIO
+        int "Whisplay Sound I2S codec-to-P4 GPIO (HAT pin 38)"
+        default 27
+
+    config WHISPLAY_DSI_LANE_BITRATE_MBPS
+        int "DSI lane bit rate (Mbps)"
+        default 500
+        range 80 1500
+
+endmenu
