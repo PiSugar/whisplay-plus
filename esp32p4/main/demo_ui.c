@@ -33,9 +33,13 @@ static void pixel(uint8_t *fb, int x, int y, color_t color)
         return;
     }
     uint8_t *p = &fb[(y * W + x) * 3];
-    p[0] = color.r;
+    // The ST7701P DPI path consumes each RGB888 pixel in B, G, R byte order
+    // in memory. Keeping color_t in the natural RGB order makes the palette
+    // readable, while storing the bytes in panel order prevents red/blue
+    // swaps (for example BLUE appearing orange on screen).
+    p[0] = color.b;
     p[1] = color.g;
-    p[2] = color.b;
+    p[2] = color.r;
 }
 
 static void blend_pixel(uint8_t *fb, int x, int y, color_t color, uint8_t alpha)
@@ -45,9 +49,9 @@ static void blend_pixel(uint8_t *fb, int x, int y, color_t color, uint8_t alpha)
     }
     uint8_t *p = &fb[(y * W + x) * 3];
     const unsigned inverse = 255U - alpha;
-    p[0] = (uint8_t)((p[0] * inverse + color.r * alpha) / 255U);
+    p[0] = (uint8_t)((p[0] * inverse + color.b * alpha) / 255U);
     p[1] = (uint8_t)((p[1] * inverse + color.g * alpha) / 255U);
-    p[2] = (uint8_t)((p[2] * inverse + color.b * alpha) / 255U);
+    p[2] = (uint8_t)((p[2] * inverse + color.r * alpha) / 255U);
 }
 
 static void rect(uint8_t *fb, int x, int y, int w, int h, color_t color)
@@ -193,6 +197,23 @@ static void status(uint8_t *fb, int x, int y, bool ok)
     text(fb, x + 5, y + 2, ok ? "ONLINE" : "MISS", 1, BACKGROUND);
 }
 
+static void status_panel(uint8_t *fb, int x, int y, int w, int h,
+                         color_t accent, const char *title, bool ok)
+{
+    rect(fb, x + 4, y + 4, w, h, C(3, 7, 14));
+    rect(fb, x, y, w, h, PANEL);
+    rect(fb, x, y, 6, h, accent);
+    rect(fb, x + 6, y, w - 6, 2, accent);
+
+    const int badge_x = x + w - 72;
+    const int title_x = x + 16;
+    const int title_width_2x = (int)strlen(title) * 12 - 2;
+    const int title_scale = title_width_2x <= badge_x - title_x - 8 ? 2 : 1;
+    const int title_y = y + (title_scale == 2 ? 12 : 17);
+    text(fb, title_x, title_y, title, title_scale, TEXT);
+    status(fb, badge_x, y + 12, ok);
+}
+
 static int scaled(float value, float maximum, int width)
 {
     if (value > maximum) { value = maximum; }
@@ -239,8 +260,7 @@ void demo_ui_render(uint8_t *fb, const demo_state_t *s)
              (unsigned long)(s->uptime_s % 60));
     text(fb, 409, 17, buffer, 1, MUTED);
 
-    panel(fb, 14, 70, 218, 116, CYAN, "DISPLAY");
-    status(fb, 160, 82, s->display_ok);
+    status_panel(fb, 14, 70, 218, 116, CYAN, "DISPLAY", s->display_ok);
     text(fb, 31, 109, "480 X 640", 2, CYAN);
     text(fb, 31, 132, "RGB888 / 2-LANE DSI", 1, MUTED);
     for (int i = 0; i < 7; ++i) {
@@ -248,8 +268,7 @@ void demo_ui_render(uint8_t *fb, const demo_state_t *s)
              (color_t[]){CYAN, MAGENTA, AMBER, LIME, RED, BLUE, TEXT}[i]);
     }
 
-    panel(fb, 242, 70, 224, 116, MAGENTA, "TOUCH");
-    status(fb, 394, 82, s->touch_ok);
+    status_panel(fb, 242, 70, 224, 116, MAGENTA, "TOUCH", s->touch_ok);
     snprintf(buffer, sizeof(buffer), "%u / 5 CONTACTS", s->touch_count);
     text(fb, 259, 109, buffer, 1, s->touch_count ? MAGENTA : MUTED);
     rect(fb, 259, 126, 188, 43, PANEL_DARK);
@@ -262,8 +281,7 @@ void demo_ui_render(uint8_t *fb, const demo_state_t *s)
     snprintf(buffer, sizeof(buffer), "EVENTS %lu", (unsigned long)s->touch_events);
     text(fb, 259, 173, buffer, 1, MUTED);
 
-    panel(fb, 14, 198, 286, 138, AMBER, "MOTION / QMI8658B");
-    status(fb, 226, 210, s->imu_ok);
+    status_panel(fb, 14, 198, 286, 138, AMBER, "MOTION / QMI8658B", s->imu_ok);
     vector_bar(fb, 31, 241, 116, s->ax_g, 2.0f, RED, "AX");
     vector_bar(fb, 31, 256, 116, s->ay_g, 2.0f, LIME, "AY");
     vector_bar(fb, 31, 271, 116, s->az_g, 2.0f, BLUE, "AZ");
@@ -275,8 +293,7 @@ void demo_ui_render(uint8_t *fb, const demo_state_t *s)
     snprintf(buffer, sizeof(buffer), "T %0.1F C", s->temperature_c);
     text(fb, 31, 315, buffer, 1, AMBER);
 
-    panel(fb, 310, 198, 156, 138, LIME, "COMPASS");
-    status(fb, 394, 210, s->mag_ok);
+    status_panel(fb, 310, 198, 156, 138, LIME, "COMPASS", s->mag_ok);
     const int ccx = 388, ccy = 272, radius = 42;
     circle(fb, ccx, ccy, radius, s->mag_ok ? LIME : MUTED, false);
     circle(fb, ccx, ccy, 2, TEXT, true);
@@ -292,25 +309,41 @@ void demo_ui_render(uint8_t *fb, const demo_state_t *s)
     snprintf(buffer, sizeof(buffer), "%03.0F DEG", s->heading_deg);
     text(fb, 354, 321, buffer, 1, s->mag_ok ? TEXT : MUTED);
 
-    panel(fb, 14, 346, 286, 126, RED, "WHISPLAY SOUND");
-    status(fb, 226, 358, s->audio_ok);
+    status_panel(fb, 14, 346, 286, 126, RED, "WHISPLAY SOUND", s->audio_ok);
     rect(fb, 31, 379, 110, 20, s->audio_onboard ? PANEL_DARK : RED);
     rect(fb, 145, 379, 121, 20, s->audio_onboard ? BLUE : PANEL_DARK);
     text(fb, 39, 385, "HAT ES8389", 1, s->audio_onboard ? MUTED : BACKGROUND);
     text(fb, 151, 385, "BOARD ES8311", 1, s->audio_onboard ? BACKGROUND : MUTED);
-    text(fb, 31, 405, "MIC LIVE", 1, MUTED);
+    text(fb, 31, 405, s->audio_recording ? "MIC REC" : "MIC LIVE", 1,
+         s->audio_recording ? RED : MUTED);
     rect(fb, 58, 404, 183, 12, PANEL_DARK);
     rect(fb, 60, 406, s->mic_level * 179 / 100, 8,
          s->mic_level > 75 ? RED : (s->mic_level > 35 ? AMBER : LIME));
     snprintf(buffer, sizeof(buffer), "%u%%", s->mic_level);
     text(fb, 247, 406, buffer, 1, TEXT);
-    const bool audio_hot = s->audio_pressed || s->audio_testing;
-    rect(fb, 31, 430, 235, 27,
-         s->audio_ok ? (audio_hot ? TEXT : RED) : PANEL_DARK);
-    text(fb, s->audio_testing ? 67 : (s->audio_onboard ? 75 : 74), 437,
-         s->audio_testing ? "MIC + TONE RUNNING" :
-         (s->audio_onboard ? "TAP TEST SPEAKER" : "TAP TEST MIC + TONE"), 1,
-         s->audio_ok ? BACKGROUND : MUTED);
+    const bool record_hot = s->audio_record_pressed || s->audio_recording;
+    const bool play_hot = s->audio_play_pressed || s->audio_playing;
+    rect(fb, 31, 430, 112, 27,
+         s->audio_ok ? (record_hot ? PANEL_DARK : RED) : PANEL_DARK);
+    rect(fb, 149, 430, 117, 27,
+         s->audio_ok && s->audio_clip_ready ? (play_hot ? PANEL_DARK : BLUE) : PANEL_DARK);
+    const int audio_progress = s->audio_progress > 100 ? 100 : s->audio_progress;
+    if (s->audio_recording) {
+        rect(fb, 31, 430, 112 * audio_progress / 100, 27, RED);
+        snprintf(buffer, sizeof(buffer), "REC %u%%", audio_progress);
+        text(fb, 50, 437, buffer, 1, TEXT);
+    } else {
+        text(fb, 50, 437, "RECORD 10S", 1,
+             s->audio_ok ? (record_hot ? TEXT : BACKGROUND) : MUTED);
+    }
+    if (s->audio_playing) {
+        rect(fb, 149, 430, 117 * audio_progress / 100, 27, BLUE);
+        snprintf(buffer, sizeof(buffer), "PLAY %u%%", audio_progress);
+        text(fb, 181, 437, buffer, 1, TEXT);
+    } else {
+        text(fb, 178, 437, "PLAY CLIP", 1,
+             s->audio_ok && s->audio_clip_ready ? (play_hot ? TEXT : BACKGROUND) : MUTED);
+    }
 
     panel(fb, 310, 346, 156, 126, BLUE, "I / O");
     circle(fb, 338, 395, 14, s->button_pressed ? AMBER : MUTED, s->button_pressed);
@@ -334,7 +367,8 @@ void demo_ui_render(uint8_t *fb, const demo_state_t *s)
     text(fb, 265, 520, buffer, 1, TEXT);
     snprintf(buffer, sizeof(buffer), "BUTTON %lu", (unsigned long)s->button_events);
     text(fb, 265, 540, buffer, 1, TEXT);
-    snprintf(buffer, sizeof(buffer), "TONES %lu", (unsigned long)s->tone_events);
+    snprintf(buffer, sizeof(buffer), "REC %lu PLAY %lu", (unsigned long)s->record_events,
+             (unsigned long)s->playback_events);
     text(fb, 265, 560, buffer, 1, TEXT);
     text(fb, 265, 584, s->mag_ok ? "ALL SENSORS READY" : "MAG SENSOR MISSING", 1,
          s->mag_ok ? LIME : RED);
@@ -361,9 +395,14 @@ void demo_ui_render(uint8_t *fb, const demo_state_t *s)
     }
 }
 
-bool demo_ui_hit_audio(uint16_t x, uint16_t y)
+bool demo_ui_hit_audio_record(uint16_t x, uint16_t y)
 {
-    return x >= 31 && x < 266 && y >= 426 && y < 460;
+    return x >= 31 && x < 144 && y >= 426 && y < 460;
+}
+
+bool demo_ui_hit_audio_play(uint16_t x, uint16_t y)
+{
+    return x >= 149 && x < 266 && y >= 426 && y < 460;
 }
 
 bool demo_ui_hit_audio_mode(uint16_t x, uint16_t y)

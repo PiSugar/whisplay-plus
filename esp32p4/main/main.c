@@ -49,6 +49,47 @@
 static const char *TAG = "whisplay-p4";
 static volatile uint32_t display_frame_sequence;
 
+typedef enum {
+    AUDIO_JOB_IDLE,
+    AUDIO_JOB_RECORD,
+    AUDIO_JOB_PLAY,
+} audio_job_kind_t;
+
+typedef struct {
+    whisplay_audio_t *audio;
+    volatile audio_job_kind_t kind;
+    volatile bool finished;
+    volatile esp_err_t result;
+} audio_job_t;
+
+static void audio_job_task(void *argument)
+{
+    audio_job_t *job = argument;
+    const audio_job_kind_t kind = job->kind;
+    job->result = kind == AUDIO_JOB_RECORD
+        ? whisplay_audio_record_10s(job->audio)
+        : whisplay_audio_play_recording(job->audio);
+    job->finished = true;
+    vTaskDelete(NULL);
+}
+
+static bool start_audio_job(audio_job_t *job, audio_job_kind_t kind)
+{
+    if (job->kind != AUDIO_JOB_IDLE) {
+        return false;
+    }
+    job->kind = kind;
+    job->finished = false;
+    job->result = ESP_OK;
+    if (xTaskCreate(audio_job_task, kind == AUDIO_JOB_RECORD ? "record_clip" : "play_clip",
+                    4096, job, 5, NULL) != pdPASS) {
+        job->kind = AUDIO_JOB_IDLE;
+        job->result = ESP_ERR_NO_MEM;
+        return false;
+    }
+    return true;
+}
+
 static bool IRAM_ATTR display_frame_complete(esp_lcd_panel_handle_t panel,
                                              esp_lcd_dpi_panel_event_data_t *event,
                                              void *user_ctx)
@@ -571,11 +612,46 @@ void app_main(void)
     TickType_t last_sensor_read = 0;
     TickType_t last_render = 0;
     bool touch_armed = true;
+    audio_job_t audio_job = {
+        .audio = &audio,
+        .kind = AUDIO_JOB_IDLE,
+        .finished = false,
+        .result = ESP_OK,
+    };
     for (;;) {
+        if (audio_job.kind != AUDIO_JOB_IDLE) {
+            state.audio_progress = audio.operation_progress;
+            if (audio_job.kind == AUDIO_JOB_RECORD) {
+                state.mic_level = audio.last_mic_level;
+            }
+        }
+        if (audio_job.finished) {
+            const audio_job_kind_t completed_kind = audio_job.kind;
+            const esp_err_t completed_result = audio_job.result;
+            audio_job.finished = false;
+            audio_job.kind = AUDIO_JOB_IDLE;
+            state.audio_recording = false;
+            state.audio_playing = false;
+            state.audio_record_pressed = false;
+            state.audio_play_pressed = false;
+            state.audio_clip_ready = whisplay_audio_has_recording(&audio);
+            state.mic_level = audio.last_mic_level;
+            state.audio_progress = completed_result == ESP_OK ? 100 : audio.operation_progress;
+            if (completed_result != ESP_OK) {
+                ESP_LOGE(TAG, "%s job failed: %s",
+                         completed_kind == AUDIO_JOB_RECORD ? "recording" : "playback",
+                         esp_err_to_name(completed_result));
+            } else {
+                ESP_LOGI(TAG, "%s job completed",
+                         completed_kind == AUDIO_JOB_RECORD ? "recording" : "playback");
+            }
+        }
         poll_touch(touch, &state);
 
-        state.audio_pressed = state.touch_count > 0 &&
-                              demo_ui_hit_audio(state.touches[0].x, state.touches[0].y);
+        state.audio_record_pressed = state.touch_count > 0 &&
+            demo_ui_hit_audio_record(state.touches[0].x, state.touches[0].y);
+        state.audio_play_pressed = state.touch_count > 0 &&
+            demo_ui_hit_audio_play(state.touches[0].x, state.touches[0].y);
         state.rgb_pressed = state.touch_count > 0 &&
                             demo_ui_hit_rgb(state.touches[0].x, state.touches[0].y);
 
@@ -590,11 +666,13 @@ void app_main(void)
             state.ripple_y = y;
             state.ripple_age = 0;
             ESP_LOGI(TAG,
-                     "touch down raw=(%u,%u) mapped=(%u,%u): sound=%d mode=%d io=%d",
+                     "touch down raw=(%u,%u) mapped=(%u,%u): record=%d play=%d mode=%d io=%d",
                      state.touches[0].raw_x, state.touches[0].raw_y, x, y,
-                     demo_ui_hit_audio(x, y), demo_ui_hit_audio_mode(x, y),
+                     demo_ui_hit_audio_record(x, y), demo_ui_hit_audio_play(x, y),
+                     demo_ui_hit_audio_mode(x, y),
                      demo_ui_hit_rgb(x, y));
-            if (demo_ui_hit_audio_mode(x, y) && state.audio_ok) {
+            if (demo_ui_hit_audio_mode(x, y) && state.audio_ok &&
+                audio_job.kind == AUDIO_JOB_IDLE) {
                 state.audio_onboard = !state.audio_onboard;
                 const esp_err_t mode_result =
                     whisplay_audio_set_onboard_codec(&audio, state.audio_onboard);
@@ -603,22 +681,39 @@ void app_main(void)
                     ESP_LOGE(TAG, "audio mode switch failed: %s", esp_err_to_name(mode_result));
                 } else {
                     state.mic_level = 0;
+                    state.audio_clip_ready = whisplay_audio_has_recording(&audio);
                     ESP_LOGI(TAG, "audio mode switched to %s",
                              state.audio_onboard ? "onboard ES8311" : "Whisplay ES8389");
                 }
                 demo_ui_render(framebuffers[back_buffer], &state);
                 ESP_ERROR_CHECK(display_present(panel, framebuffers[back_buffer]));
                 back_buffer ^= 1;
-            } else if (demo_ui_hit_audio(x, y) && state.audio_ok) {
-                ++state.tone_events;
-                state.audio_testing = true;
-                ESP_LOGI(TAG, "Sound tile pressed at (%u,%u), starting audio test", x, y);
+            } else if (demo_ui_hit_audio_record(x, y) && state.audio_ok &&
+                       audio_job.kind == AUDIO_JOB_IDLE) {
+                ++state.record_events;
+                state.audio_clip_ready = false;
+                state.audio_progress = 0;
+                ESP_LOGI(TAG, "Sound record pressed at (%u,%u), capturing 10 seconds", x, y);
+                if (start_audio_job(&audio_job, AUDIO_JOB_RECORD)) {
+                    state.audio_recording = true;
+                } else {
+                    state.audio_record_pressed = false;
+                    ESP_LOGE(TAG, "failed to start recording task");
+                }
                 demo_ui_render(framebuffers[back_buffer], &state);
                 ESP_ERROR_CHECK(display_present(panel, framebuffers[back_buffer]));
                 back_buffer ^= 1;
-                whisplay_audio_play_tone(&audio);
-                state.audio_testing = false;
-                state.mic_level = whisplay_audio_read_mic_level(&audio);
+            } else if (demo_ui_hit_audio_play(x, y) && state.audio_ok &&
+                       state.audio_clip_ready && audio_job.kind == AUDIO_JOB_IDLE) {
+                ++state.playback_events;
+                state.audio_progress = 0;
+                ESP_LOGI(TAG, "Sound playback pressed at (%u,%u)", x, y);
+                if (start_audio_job(&audio_job, AUDIO_JOB_PLAY)) {
+                    state.audio_playing = true;
+                } else {
+                    state.audio_play_pressed = false;
+                    ESP_LOGE(TAG, "failed to start playback task");
+                }
                 demo_ui_render(framebuffers[back_buffer], &state);
                 ESP_ERROR_CHECK(display_present(panel, framebuffers[back_buffer]));
                 back_buffer ^= 1;
@@ -665,7 +760,7 @@ void app_main(void)
             state.heading_deg = sample.heading_deg;
             state.mag_status = sample.mag_status;
         }
-        if (state.audio_ok) {
+        if (state.audio_ok && audio_job.kind == AUDIO_JOB_IDLE) {
             const uint8_t mic = whisplay_audio_read_mic_level(&audio);
             state.mic_level = (state.mic_level * 3 + mic) / 4;
         }

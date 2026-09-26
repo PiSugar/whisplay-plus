@@ -22,8 +22,13 @@ typedef struct {
     uint8_t touch_count;
     demo_touch_t touches[DEMO_MAX_TOUCHES];
     bool button_pressed;
-    bool audio_pressed;
     bool audio_testing;
+    bool audio_record_pressed;
+    bool audio_play_pressed;
+    bool audio_recording;
+    bool audio_playing;
+    bool audio_clip_ready;
+    uint8_t audio_progress;
     bool audio_onboard;
     bool rgb_pressed;
     bool ripple_active;
@@ -48,9 +53,12 @@ typedef struct {
     uint32_t touch_events;
     uint32_t button_events;
     uint32_t tone_events;
+    uint32_t record_events;
+    uint32_t playback_events;
 } demo_state_t;
 
 void demo_ui_render(uint8_t *framebuffer, const demo_state_t *state);
-bool demo_ui_hit_audio(uint16_t x, uint16_t y);
+bool demo_ui_hit_audio_record(uint16_t x, uint16_t y);
+bool demo_ui_hit_audio_play(uint16_t x, uint16_t y);
 bool demo_ui_hit_audio_mode(uint16_t x, uint16_t y);
 bool demo_ui_hit_rgb(uint16_t x, uint16_t y);

@@ -9,6 +9,7 @@
 #include "audio_codec_if.h"
 #include "esp_codec_dev_defaults.h"
 #include "driver/gpio.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "es8311_codec.h"
 #include "es8389_codec.h"
@@ -19,6 +20,10 @@
 #define ES8389_ADDRESS 0x10
 #define AUDIO_SAMPLE_RATE 16000
 #define TONE_FREQUENCY_HZ 1000
+#define RECORDING_SECONDS 10
+#define RECORDING_CHANNELS 2
+#define RECORDING_BYTES ((size_t)AUDIO_SAMPLE_RATE * RECORDING_SECONDS * \
+                         RECORDING_CHANNELS * sizeof(int16_t))
 #define TONE_WINDOW_FRAMES 256
 #define TONE_GOERTZEL_COEFFICIENT 1.8477591f // 2*cos(2*pi*1000/16000)
 #define ONBOARD_I2S_MCLK_GPIO 13
@@ -38,6 +43,26 @@ static i2c_master_bus_handle_t s_i2c_bus;
 static const audio_codec_ctrl_if_t *s_es8311_ctrl;
 static const audio_codec_gpio_if_t *s_es8311_gpio;
 static const audio_codec_if_t *s_es8311_if;
+
+static esp_err_t configure_whisplay_i2s_pads(void)
+{
+    // GPIO45 also drives the Waveshare board's microSD power-switch MOSFET.
+    // Use the strongest pad drive and remove pad pulls so the signal arriving
+    // at the HAT through its 10-ohm series resistor has the best possible
+    // edges despite that extra board-level load.
+    static const gpio_num_t output_pins[] = {
+        CONFIG_WHISPLAY_I2S_BCLK_GPIO,
+        CONFIG_WHISPLAY_I2S_LRCLK_GPIO,
+        CONFIG_WHISPLAY_I2S_DOUT_GPIO,
+    };
+    for (size_t i = 0; i < sizeof(output_pins) / sizeof(output_pins[0]); ++i) {
+        ESP_RETURN_ON_ERROR(gpio_set_drive_capability(output_pins[i], GPIO_DRIVE_CAP_3),
+                            TAG, "set WhisPlay I2S pad drive");
+        ESP_RETURN_ON_ERROR(gpio_set_pull_mode(output_pins[i], GPIO_FLOATING),
+                            TAG, "disable WhisPlay I2S pad pulls");
+    }
+    return ESP_OK;
+}
 
 static esp_err_t create_i2s_tx(whisplay_audio_t *audio)
 {
@@ -64,8 +89,9 @@ static esp_err_t create_i2s_tx(whisplay_audio_t *audio)
     if (result != ESP_OK) {
         i2s_del_channel(audio->tx);
         audio->tx = NULL;
+        return result;
     }
-    return result;
+    return configure_whisplay_i2s_pads();
 }
 
 static esp_err_t create_onboard_i2s_tx(whisplay_audio_t *audio)
@@ -193,6 +219,13 @@ static esp_err_t create_i2s_pair(whisplay_audio_t *audio, int din_gpio)
     };
     esp_err_t result = i2s_channel_init_std_mode(audio->tx, &tx_config);
     if (result == ESP_OK) result = i2s_channel_init_std_mode(audio->rx, &rx_config);
+    if (result == ESP_OK) result = configure_whisplay_i2s_pads();
+    if (result == ESP_OK && din_gpio == CONFIG_WHISPLAY_I2S_DOUT_GPIO) {
+        // The diagnostic uses the output pad itself as the RX source. The I2S
+        // GPIO setup leaves an output-only pad with its input buffer disabled
+        // on ESP32-P4, which previously made this loopback report zero frames.
+        result = gpio_input_enable(din_gpio);
+    }
     if (result != ESP_OK) {
         i2s_del_channel(audio->rx);
         i2s_del_channel(audio->tx);
@@ -369,9 +402,10 @@ static esp_err_t official_codec_open(void)
     }
     ESP_RETURN_ON_ERROR(official_codec_configure(), TAG, "configure codec");
     // Keep this sequence identical to the active Whisplay production tester.
-    // Use 0 dB for the hardware-test tone.  This maps to 0xBF in the ES8389
-    // DAC volume registers and removes playback level as a test variable.
-    ESP_RETURN_ON_ERROR(codec_result(s_codec_if->set_vol(s_codec_if, 0.0f),
+    // Match the active WhisPlay production tester.  With esp_codec_dev's
+    // default 3.3 V DAC / 5 V PA compensation this stays below the ES8389's
+    // documented 0 dB register ceiling (0xBF); requesting 0 dB writes 0xC6.
+    ESP_RETURN_ON_ERROR(codec_result(s_codec_if->set_vol(s_codec_if, -12.0f),
                                      "ES8389 set playback volume"),
                         TAG, "configure playback volume");
     if (s_codec_if->mute != NULL) {
@@ -380,15 +414,14 @@ static esp_err_t official_codec_open(void)
     }
     ESP_RETURN_ON_ERROR(codec_result(s_codec_if->enable(s_codec_if, true), "ES8389 enable"),
                         TAG, "enable codec");
-    // Keep every DAC block out of reset.  Register 0x4D bit 1 is RST_DAC_DSM;
-    // leaving the Linux driver's revision-specific value 0x02 here prevents
-    // this device from reaching the documented Normal state (F1=0x0D).
     ESP_RETURN_ON_ERROR(codec_write(s_direct_codec, 0x4d, 0x00), TAG,
                         "release ES8389 DAC reset state");
-    ESP_RETURN_ON_ERROR(codec_write(s_direct_codec, 0xf0, 0x13), TAG,
-                        "restore ES8389 DAC reference state");
+    ESP_RETURN_ON_ERROR(codec_write(s_direct_codec, 0xf0, 0x12), TAG,
+                        "apply ES8389 external-clock state");
+    ESP_RETURN_ON_ERROR(codec_write(s_direct_codec, 0x61, 0xf9), TAG,
+                        "enable ES8389 DAC analogue reference");
     ESP_RETURN_ON_ERROR(codec_write(s_direct_codec, 0x69, 0x20), TAG,
-                        "select ES8389 line output drivers");
+                        "select ES8389 line outputs for HAT amplifiers");
     // esp_codec_dev's ES8389 mute callback currently operates on ADC_FORMAT
     // (0x20), not DAC_FORMAT (0x40).  Explicitly clear the DAC mute bits so
     // this speaker test cannot remain digitally muted.
@@ -397,6 +430,13 @@ static esp_err_t official_codec_open(void)
                         "read ES8389 DAC format");
     ESP_RETURN_ON_ERROR(codec_write(s_direct_codec, 0x40, dac_format & 0xfc), TAG,
                         "unmute ES8389 DAC");
+    // The component's board-gain compensation makes set_vol(0 dB) overshoot
+    // the codec's unity value. Program the datasheet's exact 0 dB code for
+    // this hardware test so playback level cannot hide a valid HAT path.
+    ESP_RETURN_ON_ERROR(codec_write(s_direct_codec, 0x46, 0xbf), TAG,
+                        "set ES8389 left DAC to 0 dB");
+    ESP_RETURN_ON_ERROR(codec_write(s_direct_codec, 0x47, 0xbf), TAG,
+                        "set ES8389 right DAC to 0 dB");
     uint8_t dac_reset = 0;
     uint8_t chip_misc = 0;
     uint8_t dac_vol_l = 0;
@@ -659,9 +699,8 @@ esp_err_t whisplay_audio_init(i2c_master_bus_handle_t bus, whisplay_audio_t *aud
         .pa_pin = -1,
         .pa_reverted = false,
         .master_mode = false,
-        // WhisPlay Plus supplies a dedicated 24.576 MHz clock from its X4
-        // oscillator.  Use it so the codec state machine does not depend on
-        // the low 512 kHz serial BCLK generated by the ESP32-P4.
+        // The P4/HAT combination reaches Normal state and records reliably
+        // with the WhisPlay Plus on-board 24.576 MHz oscillator selected.
         .use_mclk = true,
         .digital_mic = false,
         .invert_mclk = false,
@@ -703,6 +742,162 @@ esp_err_t whisplay_audio_set_onboard_codec(whisplay_audio_t *audio, bool onboard
         return start_onboard_microphone(audio);
     }
     return start_whisplay_microphone(audio);
+}
+
+bool whisplay_audio_has_recording(const whisplay_audio_t *audio)
+{
+    return audio != NULL && audio->recording != NULL &&
+           audio->recording_bytes == RECORDING_BYTES;
+}
+
+esp_err_t whisplay_audio_record_10s(whisplay_audio_t *audio)
+{
+    ESP_RETURN_ON_FALSE(audio != NULL && audio->ready && audio->active && audio->rx != NULL,
+                        ESP_ERR_INVALID_STATE, TAG, "microphone is not ready for recording");
+
+    if (audio->recording == NULL) {
+        audio->recording = heap_caps_malloc(RECORDING_BYTES,
+                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        ESP_RETURN_ON_FALSE(audio->recording != NULL, ESP_ERR_NO_MEM, TAG,
+                            "allocate 10-second recording in PSRAM");
+    }
+    audio->recording_bytes = 0;
+    audio->operation_progress = 0;
+    int16_t minimum[2] = {INT16_MAX, INT16_MAX};
+    int16_t maximum[2] = {INT16_MIN, INT16_MIN};
+    unsigned int consecutive_timeouts = 0;
+    uint8_t *destination = (uint8_t *)audio->recording;
+
+    ESP_LOGI(TAG, "%s recording started: %d seconds, %u bytes",
+             audio->onboard_codec ? "ES8311" : "ES8389", RECORDING_SECONDS,
+             (unsigned)RECORDING_BYTES);
+    while (audio->recording_bytes < RECORDING_BYTES) {
+        const size_t remaining = RECORDING_BYTES - audio->recording_bytes;
+        const size_t request = remaining < 4096 ? remaining : 4096;
+        size_t bytes_read = 0;
+        const esp_err_t result = i2s_channel_read(audio->rx,
+                                                   destination + audio->recording_bytes,
+                                                   request, &bytes_read,
+                                                   pdMS_TO_TICKS(500));
+        if (bytes_read > 0) {
+            const int16_t *samples = (const int16_t *)(destination + audio->recording_bytes);
+            const size_t sample_count = bytes_read / sizeof(int16_t);
+            int16_t block_minimum[2] = {INT16_MAX, INT16_MAX};
+            int16_t block_maximum[2] = {INT16_MIN, INT16_MIN};
+            for (size_t i = 0; i < sample_count; ++i) {
+                const int channel = i & 1;
+                if (samples[i] < minimum[channel]) minimum[channel] = samples[i];
+                if (samples[i] > maximum[channel]) maximum[channel] = samples[i];
+                if (samples[i] < block_minimum[channel]) block_minimum[channel] = samples[i];
+                if (samples[i] > block_maximum[channel]) block_maximum[channel] = samples[i];
+            }
+            audio->recording_bytes += bytes_read;
+            int block_peak = 0;
+            for (int channel = 0; channel < 2; ++channel) {
+                const int channel_peak =
+                    ((int)block_maximum[channel] - block_minimum[channel]) / 2;
+                if (channel_peak > block_peak) block_peak = channel_peak;
+            }
+            audio->last_mic_raw_peak = block_peak > UINT16_MAX
+                ? UINT16_MAX : (uint16_t)block_peak;
+            const int live_level = block_peak * 100 / 6000;
+            audio->last_mic_level = live_level > 100 ? 100 : (uint8_t)live_level;
+            audio->operation_progress =
+                (uint8_t)(audio->recording_bytes * 100 / RECORDING_BYTES);
+            consecutive_timeouts = 0;
+        } else if (result != ESP_OK && ++consecutive_timeouts >= 3) {
+            ESP_LOGE(TAG, "recording stopped: %s", esp_err_to_name(result));
+            audio->recording_bytes = 0;
+            return result;
+        }
+    }
+
+    int peak = 0;
+    for (int channel = 0; channel < 2; ++channel) {
+        const int channel_peak = ((int)maximum[channel] - minimum[channel]) / 2;
+        if (channel_peak > peak) peak = channel_peak;
+    }
+    audio->last_mic_raw_peak = peak > UINT16_MAX ? UINT16_MAX : (uint16_t)peak;
+    const int level = peak * 100 / 6000;
+    audio->last_mic_level = level > 100 ? 100 : (uint8_t)level;
+    audio->operation_progress = 100;
+    ESP_LOGI(TAG, "%s recording complete: bytes=%u raw peak=%u level=%u%%",
+             audio->onboard_codec ? "ES8311" : "ES8389",
+             (unsigned)audio->recording_bytes, audio->last_mic_raw_peak,
+             audio->last_mic_level);
+    return ESP_OK;
+}
+
+esp_err_t whisplay_audio_play_recording(whisplay_audio_t *audio)
+{
+    ESP_RETURN_ON_FALSE(audio != NULL && audio->ready, ESP_ERR_INVALID_STATE, TAG,
+                        "audio is not ready");
+    ESP_RETURN_ON_FALSE(whisplay_audio_has_recording(audio), ESP_ERR_NOT_FOUND, TAG,
+                        "no complete recording is available");
+
+    const bool onboard = audio->onboard_codec;
+    audio->operation_progress = 0;
+    release_i2s_channels(audio);
+    if (onboard && s_es8311_if != NULL) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(codec_result(s_es8311_if->enable(s_es8311_if, false),
+                                                   "ES8311 stop record before clip playback"));
+    } else if (!onboard && s_codec_if != NULL && s_codec_open) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(official_codec_close());
+    }
+
+    esp_err_t result = onboard ? create_onboard_i2s_tx(audio) : create_i2s_tx(audio);
+    if (result == ESP_OK) result = i2s_channel_enable(audio->tx);
+    if (result == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        result = onboard ? onboard_es8311_enable(true) : official_codec_open();
+    }
+
+    if (result == ESP_OK) {
+        ESP_LOGI(TAG, "%s recording playback started: %u bytes",
+                 onboard ? "ES8311" : "ES8389", (unsigned)audio->recording_bytes);
+        const uint8_t *source = (const uint8_t *)audio->recording;
+        size_t offset = 0;
+        while (offset < audio->recording_bytes) {
+            const size_t remaining = audio->recording_bytes - offset;
+            const size_t request = remaining < 4096 ? remaining : 4096;
+            size_t bytes_written = 0;
+            result = i2s_channel_write(audio->tx, source + offset, request,
+                                       &bytes_written, pdMS_TO_TICKS(1000));
+            if (result != ESP_OK || bytes_written == 0) {
+                if (result == ESP_OK) result = ESP_FAIL;
+                ESP_LOGE(TAG, "recording playback stopped at %u bytes: %s",
+                         (unsigned)offset, esp_err_to_name(result));
+                break;
+            }
+            offset += bytes_written;
+            audio->operation_progress =
+                (uint8_t)(offset * 100 / audio->recording_bytes);
+        }
+        if (result == ESP_OK) {
+            audio->operation_progress = 100;
+            ESP_LOGI(TAG, "%s recording playback complete",
+                     onboard ? "ES8311" : "ES8389");
+        }
+    } else {
+        ESP_LOGE(TAG, "%s recording playback setup failed: %s",
+                 onboard ? "ES8311" : "ES8389", esp_err_to_name(result));
+    }
+
+    if (onboard && s_es8311_if != NULL) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(codec_result(s_es8311_if->enable(s_es8311_if, false),
+                                                   "ES8311 disable after clip playback"));
+    } else if (!onboard && s_codec_if != NULL && s_codec_open) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(official_codec_close());
+    }
+    release_i2s_channels(audio);
+    const esp_err_t restore_result = onboard ? start_onboard_microphone(audio)
+                                              : start_whisplay_microphone(audio);
+    if (restore_result != ESP_OK) {
+        ESP_LOGE(TAG, "%s playback: failed to restore microphone",
+                 onboard ? "ES8311" : "ES8389");
+        return restore_result;
+    }
+    return result;
 }
 
 uint8_t whisplay_audio_read_mic_level(whisplay_audio_t *audio)
@@ -791,7 +986,7 @@ static uint16_t measure_mic_peak(whisplay_audio_t *audio, int blocks)
     return peak;
 }
 
-static void whisplay_audio_diagnostic_scan(whisplay_audio_t *audio)
+static void __attribute__((unused)) whisplay_audio_diagnostic_scan(whisplay_audio_t *audio)
 {
     if (!audio->ready) {
         return;
@@ -818,10 +1013,7 @@ static void whisplay_audio_diagnostic_scan(whisplay_audio_t *audio)
     // Replace the quiet-idle TX handle with a native full-duplex pair. Keeping
     // TX and RX on the same peripheral makes them share the exact same clock
     // state and avoids I2S1 slave synchronization losses on ESP32-P4.
-    if (audio->tx != NULL) {
-        i2s_del_channel(audio->tx);
-        audio->tx = NULL;
-    }
+    release_i2s_channels(audio);
 
     // First run the known-good reference path in isolation: TX-only I2S,
     // 16 kHz, 16-bit stereo, the same 1 kHz waveform on L and R.  Do not let

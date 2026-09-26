@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "driver/i2c_master.h"
@@ -29,9 +30,15 @@ typedef struct {
     int16_t mic_metric_min[2];
     int16_t mic_metric_max[2];
     bool onboard_codec;
+    int16_t *recording;
+    size_t recording_bytes;
+    volatile uint8_t operation_progress;
 } whisplay_audio_t;
 
 esp_err_t whisplay_audio_init(i2c_master_bus_handle_t bus, whisplay_audio_t *audio);
 uint8_t whisplay_audio_read_mic_level(whisplay_audio_t *audio);
 void whisplay_audio_play_tone(whisplay_audio_t *audio);
+esp_err_t whisplay_audio_record_10s(whisplay_audio_t *audio);
+esp_err_t whisplay_audio_play_recording(whisplay_audio_t *audio);
+bool whisplay_audio_has_recording(const whisplay_audio_t *audio);
 esp_err_t whisplay_audio_set_onboard_codec(whisplay_audio_t *audio, bool onboard);
