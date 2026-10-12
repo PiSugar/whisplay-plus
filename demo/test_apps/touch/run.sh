@@ -19,9 +19,9 @@ install_launcher() {
 Type=Application
 Version=1.0
 Name=PiSugar Touch Test
-Name[zh_CN]=PiSugar 触控测试
+Name[zh_CN]=PiSugar Touch Test
 Comment=Touchscreen and multitouch diagnostics
-Comment[zh_CN]=触控屏和多点触控检测
+Comment[zh_CN]=Touchscreen and multitouch diagnostics
 Exec=${script_dir}/run.sh
 Terminal=false
 Categories=Utility;HardwareSettings;

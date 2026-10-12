@@ -2,9 +2,9 @@
 Type=Application
 Version=1.0
 Name=Whisplay Touch Test
-Name[zh_CN]=Whisplay 触控测试
+Name[zh_CN]=Whisplay Touch Test
 Comment=Touchscreen and multitouch diagnostics
-Comment[zh_CN]=触控屏和多点触控检测
+Comment[zh_CN]=Touchscreen and multitouch diagnostics
 Exec=/opt/whisplay-hat-plus/demo/test_apps/touch/run.sh
 Icon=/opt/whisplay-hat-plus/demo/test_apps/icons/whisplay-touch-test.svg
 Terminal=false

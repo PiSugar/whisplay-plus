@@ -2,9 +2,9 @@
 Type=Application
 Version=1.0
 Name=Whisplay Sound Test
-Name[zh_CN]=Whisplay 声音测试
+Name[zh_CN]=Whisplay Sound Test
 Comment=Test playback, recording, and stereo microphone direction on Whisplay Sound
-Comment[zh_CN]=测试 Whisplay 声卡播放、录音和麦克风左右声源辨别
+Comment[zh_CN]=Test playback, recording, and stereo microphone direction on Whisplay Sound
 Exec=/opt/whisplay-hat-plus/demo/test_apps/sound/run_sound_test.sh
 Icon=/opt/whisplay-hat-plus/demo/test_apps/icons/whisplay-sound-test.svg
 Terminal=false

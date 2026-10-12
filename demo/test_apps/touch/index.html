@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -413,22 +413,22 @@
 
     <header class="topbar">
       <div>
-        <h1>PiSugar 触控测试</h1>
-        <p class="subtitle">GT911 / KDE Plasma / 多点触控</p>
+        <h1>PiSugar Touch Test</h1>
+        <p class="subtitle">GT911 / KDE Plasma / Multitouch</p>
       </div>
       <div class="actions">
-        <button id="fullscreen" type="button">全屏</button>
-        <button id="clear" type="button">清空</button>
+        <button id="fullscreen" type="button">Fullscreen</button>
+        <button id="clear" type="button">Clear</button>
       </div>
     </header>
 
     <main class="stage">
       <section id="surface" class="touch-surface" aria-label="touch test surface">
         <canvas id="trail"></canvas>
-        <div class="axis top">上</div>
-        <div class="axis bottom">下</div>
-        <div class="axis left">左</div>
-        <div class="axis right">右</div>
+        <div class="axis top">Top</div>
+        <div class="axis bottom">Bottom</div>
+        <div class="axis left">Left</div>
+        <div class="axis right">Right</div>
         <div class="target tl"></div>
         <div class="target tr"></div>
         <div class="target bl"></div>
@@ -439,29 +439,29 @@
       <aside class="hud">
         <div class="metrics">
           <div class="metric">
-            <div class="metric-label">当前点数</div>
+            <div class="metric-label">Active Touches</div>
             <div id="activeCount" class="metric-value">0</div>
           </div>
           <div class="metric">
-            <div class="metric-label">最高点数</div>
+            <div class="metric-label">Maximum Touches</div>
             <div id="maxCount" class="metric-value">0</div>
           </div>
           <div class="metric">
-            <div class="metric-label">浏览器</div>
+            <div class="metric-label">Browser</div>
             <div id="pointerSupport" class="metric-value">--</div>
           </div>
           <div class="metric">
-            <div class="metric-label">系统</div>
+            <div class="metric-label">System</div>
             <div id="systemTouch" class="metric-value">--</div>
           </div>
         </div>
 
         <div id="status" class="status"></div>
-        <div class="section-title">活动触点</div>
+        <div class="section-title">Active Touches</div>
         <div id="touchList" class="touch-list">
-          <div class="empty">等待触摸</div>
+          <div class="empty">Waiting for touch input</div>
         </div>
-        <div class="section-title">事件</div>
+        <div class="section-title">Events</div>
         <div id="eventLog" class="event-log"></div>
       </aside>
     </main>
@@ -542,7 +542,7 @@
       }
 
       function addLog(text, warn = false) {
-        const stamp = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+        const stamp = new Date().toLocaleTimeString("en-US", { hour12: false });
         retainedLogs.unshift({ text: `${stamp}  ${text}`, warn });
         retainedLogs.splice(28);
         eventLog.innerHTML = retainedLogs.map((entry) =>
@@ -618,7 +618,7 @@
         }).join("");
 
         if (!active.size) {
-          touchList.innerHTML = `<div class="empty">等待触摸</div>`;
+          touchList.innerHTML = `<div class="empty">Waiting for touch input</div>`;
           return;
         }
 
@@ -644,7 +644,7 @@
         pointerSupport.textContent = pointerOk ? "PE" : "TE";
         systemTouch.textContent = navigator.maxTouchPoints || 0;
         const parts = [
-          `<strong>Pointer Events</strong>: ${pointerOk ? "可用" : "不可用"}`,
+          `<strong>Pointer Events</strong>: ${pointerOk ? "Available" : "Unavailable"}`,
           `<strong>maxTouchPoints</strong>: ${navigator.maxTouchPoints || 0}`,
           `<strong>Viewport</strong>: ${window.innerWidth}x${window.innerHeight}`,
           `<strong>DPR</strong>: ${(window.devicePixelRatio || 1).toFixed(2)}`
