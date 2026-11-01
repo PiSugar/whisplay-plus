@@ -425,7 +425,7 @@ button{width:100%;height:48px;border:0;border-radius:10px;background:#39cd97;col
 <h1>Whisplay Compass Calibration</h1>
 <div class="card">
 <button id="start">Start Calibration</button>
-<p class="muted">Hold the phone and Whisplay device together, screens facing the same direction. If iOS shows a certificate warning, open the advanced details and continue.</p>
+<p class="muted">Works with iPhone Safari and Android Chrome. Hold the phone and Whisplay device together, screens facing the same direction. If the browser shows a certificate warning, open the advanced details and continue.</p>
 <p id="secure" class="muted"></p>
 </div>
 <div class="card">
@@ -447,10 +447,36 @@ button{width:100%;height:48px;border:0;border-radius:10px;background:#39cd97;col
 <script>
 let sensorActive=false, uploading=false, sent=0, dropped=0, lastHeading=null, lastAcceptedHeading=null, lastAcceptedTime=0;
 let lastEventWallTime=0;
+let absoluteEventSeen=false, sensorSource='';
+function screenAngle(){
+  const orientation=screen.orientation;
+  const angle=orientation && typeof orientation.angle === 'number' ? orientation.angle : window.orientation;
+  return typeof angle === 'number' ? angle : 0;
+}
+function androidHeading(e){
+  if (![e.alpha,e.beta,e.gamma].every(Number.isFinite)) return null;
+  const rad=Math.PI/180;
+  const x=e.beta*rad, y=e.gamma*rad, z=e.alpha*rad;
+  const cX=Math.cos(x), cY=Math.cos(y), cZ=Math.cos(z);
+  const sX=Math.sin(x), sY=Math.sin(y), sZ=Math.sin(z);
+  const vx=-cZ*sY-sZ*sX*cY;
+  const vy=-sZ*sY+cZ*sX*cY;
+  if (Math.abs(vx)+Math.abs(vy)<1e-7) return (360-e.alpha+screenAngle()+360)%360;
+  let heading=Math.atan2(vx,vy)/rad;
+  if (heading<0) heading+=360;
+  return (heading+screenAngle()+360)%360;
+}
 function bestHeading(e){
-  if (typeof e.webkitCompassHeading === 'number') return e.webkitCompassHeading;
-  if (typeof e.alpha === 'number') return (360 - e.alpha + 360) % 360;
-  return null;
+  if (Number.isFinite(e.webkitCompassHeading)) {
+    sensorSource='iPhone compass';
+    return e.webkitCompassHeading;
+  }
+  const absoluteEvent=e.type==='deviceorientationabsolute';
+  if (absoluteEvent) absoluteEventSeen=true;
+  if (!absoluteEvent && (absoluteEventSeen || e.absolute!==true)) return undefined;
+  const heading=androidHeading(e);
+  if (heading!==null) sensorSource='Android absolute orientation';
+  return heading;
 }
 async function post(path, data){
   try {
@@ -490,13 +516,14 @@ async function start(){
   setTimeout(() => {
     if (sent===0 && lastHeading===null) {
       s.textContent='No compass data from browser'; s.className='bad';
-      document.getElementById('detail').textContent=window.isSecureContext ? 'Try another browser or enable motion/orientation permission.' : 'Browser may require HTTPS for motion/orientation sensors.';
+      document.getElementById('detail').textContent=window.isSecureContext ? 'Use Safari on iPhone or Chrome on Android, then enable Motion sensors in the browser site settings.' : 'The browser requires HTTPS for motion/orientation sensors.';
     }
   }, 2500);
 }
 function onOrientation(e){
   if(!sensorActive) return;
   const h=bestHeading(e);
+  if(h===undefined) return;
   if(h===null) {
     document.getElementById('detail').textContent='This browser did not provide compass heading.';
     return;
@@ -522,7 +549,7 @@ function onOrientation(e){
   document.getElementById('heading').textContent=h.toFixed(1)+'°';
   document.getElementById('rose').style.transform='rotate('+(-h)+'deg)';
   const mode=uploading ? 'uploading' : 'paused';
-  document.getElementById('detail').textContent='Compass live, '+mode+'. Samples sent: '+sent+'  dropped: '+dropped+'  beta: '+(e.beta||0).toFixed(1)+' gamma: '+(e.gamma||0).toFixed(1);
+  document.getElementById('detail').textContent=sensorSource+' live, '+mode+'. Samples sent: '+sent+'  dropped: '+dropped+'  beta: '+(e.beta||0).toFixed(1)+' gamma: '+(e.gamma||0).toFixed(1);
 }
 window.addEventListener('deviceorientation', onOrientation, true);
 window.addEventListener('deviceorientationabsolute', onOrientation, true);
@@ -559,7 +586,10 @@ class PhoneCalibrationServer:
 
         @self.app.route("/")
         def index():
-            return PHONE_PAGE
+            response = self.app.make_response(PHONE_PAGE)
+            response.headers["Permissions-Policy"] = "accelerometer=(self), gyroscope=(self), magnetometer=(self)"
+            response.headers["Cache-Control"] = "no-store"
+            return response
 
         @self.app.route("/start", methods=["POST"])
         def start():
@@ -1665,7 +1695,7 @@ class GyroTestApp:
             self.text(f"{elapsed:03.1f}/{self.gyro_cal_duration:.0f}s", x, y + 92, self.small_font, MUTED)
         elif self.mag_cal_phase == "phone_wait":
             snapshot = self.phone_snapshot()
-            self.text("Scan with iPhone on same Wi-Fi", x, y + 34, self.small_font, YELLOW)
+            self.text("Scan with iPhone / Android on same Wi-Fi", x, y + 34, self.small_font, YELLOW)
             qr_rect = self.phone_qr_surface.get_rect(center=(rect.centerx, y + 130))
             self.screen.blit(self.phone_qr_surface, qr_rect)
             self.center(f"https://{self.phone_ip}:8765", (rect.centerx, qr_rect.bottom + 15), self.body_font, TEXT)
