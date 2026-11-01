@@ -1,0 +1,284 @@
+name: Build Release Image
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-image:
+    runs-on: ubuntu-22.04
+    outputs:
+      asset_name: ${{ steps.meta.outputs.asset_name }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      release_name: ${{ steps.meta.outputs.release_name }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      source_ref: ${{ steps.meta.outputs.source_ref }}
+      source_branch: ${{ steps.meta.outputs.source_branch }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate shell scripts
+        run: |
+          for script in \
+            packaging/pi-gen/release/stage-whisplay-plus/prerun.sh \
+            packaging/pi-gen/release/stage-whisplay-plus/01-whisplay-plus/00-run.sh \
+            packaging/pi-gen/release/stage-whisplay-plus/01-whisplay-plus/00-run-chroot.sh \
+            packaging/pi-gen/release/stage-whisplay-plus/files/expand-rootfs-firstboot.sh \
+            packaging/pi-gen/release/stage-whisplay-plus/files/install-sugar-wifi-conf.sh \
+            packaging/pi-gen/release/stage-whisplay-plus/files/install-whisplay-plus.sh \
+            packaging/pi-gen/release/stage-whisplay-plus/files/provision-image.sh
+          do
+            bash -n "$script"
+          done
+
+      - name: Set release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            release_tag="${GITHUB_REF_NAME}"
+            release_name="${GITHUB_REF_NAME}"
+            prerelease="false"
+            source_branch=""
+          else
+            branch_slug="$(printf '%s' "${GITHUB_REF_NAME}" | tr '/[:space:]' '-' | tr -cd '[:alnum:]._-')"
+            release_tag="${branch_slug}-latest"
+            release_name="${branch_slug}-latest"
+            prerelease="true"
+            source_branch="${GITHUB_REF_NAME}"
+          fi
+
+          {
+            echo "release_tag=$release_tag"
+            echo "release_name=$release_name"
+            echo "asset_name=whisplay-plus.img.xz"
+            echo "prerelease=$prerelease"
+            echo "source_ref=${GITHUB_REF_NAME}"
+            echo "source_branch=$source_branch"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Free runner disk space
+        run: |
+          set -euxo pipefail
+          df -h
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /usr/local/share/chromium \
+            /usr/share/dotnet \
+            /usr/share/miniconda \
+            /usr/share/swift \
+            /opt/ghc \
+            /usr/local/.ghcup \
+            /opt/hostedtoolcache \
+            /opt/az
+          sudo docker system prune -af --volumes || true
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            binfmt-support \
+            bmap-tools \
+            qemu-user-static \
+            xz-utils
+
+      - name: Register qemu-aarch64 for binfmt_misc
+        run: |
+          qemu_static="$(command -v qemu-aarch64-static)"
+          sudo ln -sf "$qemu_static" /usr/local/bin/qemu-aarch64
+          sudo mount binfmt_misc -t binfmt_misc /proc/sys/fs/binfmt_misc || true
+          sudo update-binfmts --import qemu-aarch64 || true
+          sudo update-binfmts --enable qemu-aarch64 || true
+          test -f /proc/sys/fs/binfmt_misc/qemu-aarch64
+          cat /proc/sys/fs/binfmt_misc/qemu-aarch64
+
+      - name: Checkout pi-gen arm64
+        uses: actions/checkout@v4
+        with:
+          repository: RPi-Distro/pi-gen
+          ref: arm64
+          path: pi-gen
+
+      - name: Prepare pi-gen customization
+        env:
+          WHISPLAY_PLUS_RELEASE_VERSION: ${{ steps.meta.outputs.release_name }}
+          WHISPLAY_PLUS_SOURCE_REF: ${{ steps.meta.outputs.source_ref }}
+        run: |
+          cp -R packaging/pi-gen/release/stage-whisplay-plus pi-gen/stage-whisplay-plus
+          chmod +x \
+            pi-gen/stage-whisplay-plus/prerun.sh \
+            pi-gen/stage-whisplay-plus/01-whisplay-plus/00-run.sh \
+            pi-gen/stage-whisplay-plus/01-whisplay-plus/00-run-chroot.sh \
+            pi-gen/stage-whisplay-plus/files/expand-rootfs-firstboot.sh \
+            pi-gen/stage-whisplay-plus/files/install-sugar-wifi-conf.sh \
+            pi-gen/stage-whisplay-plus/files/install-whisplay-plus.sh \
+            pi-gen/stage-whisplay-plus/files/provision-image.sh
+          touch pi-gen/stage2/SKIP_IMAGES
+          touch pi-gen/stage3/SKIP_IMAGES
+          cp packaging/pi-gen/release/pi-gen.env pi-gen/config
+          {
+            echo "WHISPLAY_PLUS_REPO=https://github.com/${GITHUB_REPOSITORY}.git"
+            echo "WHISPLAY_PLUS_REF=${WHISPLAY_PLUS_SOURCE_REF}"
+            echo "WHISPLAY_PLUS_RELEASE_VERSION=${WHISPLAY_PLUS_RELEASE_VERSION}"
+          } >> pi-gen/config
+
+      - name: Build image with pi-gen
+        working-directory: pi-gen
+        run: sudo ./build-docker.sh
+
+      - name: Prepare release assets
+        env:
+          ASSET_NAME: ${{ steps.meta.outputs.asset_name }}
+        run: |
+          set -euo pipefail
+          deploy_dir="pi-gen/deploy"
+          find "$deploy_dir" -maxdepth 1 -type f | sort
+          raw_img="$(find "$deploy_dir" -maxdepth 1 -type f -name '*.img' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2- || true)"
+          compressed_img="$(find "$deploy_dir" -maxdepth 1 -type f -name '*.img.xz' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2- || true)"
+          if [ -z "$compressed_img" ]; then
+            echo "No compressed image found in $deploy_dir" >&2
+            exit 1
+          fi
+
+          if [ -n "$raw_img" ] && command -v bmaptool >/dev/null 2>&1; then
+            bmaptool create -o "${raw_img}.bmap" "$raw_img"
+          fi
+
+          mkdir -p release-assets
+          cp "$compressed_img" "release-assets/${ASSET_NAME}"
+          (cd release-assets && sha256sum "${ASSET_NAME}" > "${ASSET_NAME}.sha256")
+          if [ -n "$raw_img" ] && [ -f "${raw_img}.bmap" ]; then
+            cp "${raw_img}.bmap" "release-assets/${ASSET_NAME%.xz}.bmap"
+          fi
+
+      - name: Free pi-gen workspace
+        run: |
+          sudo rm -rf pi-gen/work
+          sudo docker system prune -af --volumes || true
+          df -h
+
+      - name: Inspect image contents
+        env:
+          ASSET_NAME: ${{ steps.meta.outputs.asset_name }}
+        run: |
+          set -euo pipefail
+          asset="release-assets/${ASSET_NAME}"
+          rm -f "${asset%.xz}"
+          xz -dk "$asset"
+          raw_img="${asset%.xz}"
+          loopdev="$(sudo losetup --find --show --partscan "$raw_img")"
+          cleanup() {
+            sudo umount /mnt/whisplay-plus-boot >/dev/null 2>&1 || true
+            sudo umount /mnt/whisplay-plus-root >/dev/null 2>&1 || true
+            sudo losetup -d "$loopdev" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          root_part="$(sudo lsblk -lnpo NAME,TYPE "$loopdev" | awk '$2 == "part" { print $1 }' | sed -n '2p')"
+          boot_part="$(sudo lsblk -lnpo NAME,TYPE "$loopdev" | awk '$2 == "part" { print $1 }' | sed -n '1p')"
+          test -n "$root_part"
+          test -n "$boot_part"
+          sudo mkdir -p /mnt/whisplay-plus-root /mnt/whisplay-plus-boot
+          sudo mount -o ro "$root_part" /mnt/whisplay-plus-root
+          sudo mount -o ro "$boot_part" /mnt/whisplay-plus-boot
+
+          root=/mnt/whisplay-plus-root
+          boot=/mnt/whisplay-plus-boot
+          sudo test -d "$root/home/pi/whisplay-plus/.git"
+          sudo test -x "$root/opt/whisplay-hat-plus/demo/run-whisplay-hat-plus-demo.sh"
+          sudo test -f "$root/usr/share/applications/whisplay-hat-plus-demo.desktop"
+          sudo test -f "$root/etc/modules-load.d/whisplay-hat-plus.conf"
+          sudo test -f "$root/etc/asound.conf"
+          sudo test -f "$root/etc/whisplay-image/whisplay-plus-release"
+          sudo test -f "$root/etc/systemd/system/whisplay-expand-rootfs.service"
+          sudo test -x "$root/usr/local/sbin/whisplay-expand-rootfs"
+          sudo test -x "$root/opt/sugar-wifi-config/sugar-wifi-conf"
+          sudo test -f "$root/etc/systemd/system/sugar-wifi-config.service"
+          sudo test -x "$root/usr/bin/node"
+          test -f "$boot/overlays/whisplay-plus.dtbo"
+          grep -q '^dtoverlay=whisplay-plus,display_dsi=1$' "$boot/config.txt"
+          grep -q '^dtoverlay=whisplay-plus$' "$boot/config.txt"
+          sudo grep -q 'whisplaysound' "$root/etc/asound.conf"
+          test -L "$root/etc/systemd/system/multi-user.target.wants/whisplay-expand-rootfs.service"
+          test -L "$root/etc/systemd/system/multi-user.target.wants/sugar-wifi-config.service"
+
+          kernel_count=0
+          while IFS= read -r kernel_release; do
+            [ -n "$kernel_release" ] || continue
+            kernel_count=$((kernel_count + 1))
+            display_module="$root/lib/modules/${kernel_release}/extra/st7701p_pisugar.ko"
+            sound_module="$root/lib/modules/${kernel_release}/extra/snd-soc-whisplay-soundcard.ko"
+            sudo test -f "$display_module"
+            sudo test -f "$sound_module"
+            sudo grep -q 'st7701p_pisugar.ko' "$root/lib/modules/${kernel_release}/modules.dep"
+            sudo grep -q 'snd-soc-whisplay-soundcard.ko' "$root/lib/modules/${kernel_release}/modules.dep"
+          done < <(sudo find "$root/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V)
+          test "$kernel_count" -gt 0
+          rm -f "$raw_img"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisplay-plus-image-release-assets
+          path: release-assets/*
+
+  publish-release:
+    needs: build-image
+    if: needs.build-image.outputs.prerelease == 'false' || needs.build-image.outputs.source_branch == 'develop'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync prerelease tag
+        if: needs.build-image.outputs.prerelease == 'true'
+        env:
+          RELEASE_TAG: ${{ needs.build-image.outputs.release_tag }}
+        run: |
+          git tag -f "$RELEASE_TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/${RELEASE_TAG}" --force
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: whisplay-plus-image-release-assets
+          path: release-assets
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.build-image.outputs.prerelease }}
+          RELEASE_NAME: ${{ needs.build-image.outputs.release_name }}
+          RELEASE_TAG: ${{ needs.build-image.outputs.release_tag }}
+        run: |
+          release_flags=(--title "$RELEASE_NAME" --generate-notes --verify-tag)
+          if [ "$PRERELEASE" = "true" ]; then
+            release_flags+=(--prerelease)
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_NAME"
+            if [ "$PRERELEASE" = "true" ]; then
+              gh release edit "$RELEASE_TAG" --prerelease
+            fi
+          else
+            gh release create "$RELEASE_TAG" release-assets/* "${release_flags[@]}"
+          fi

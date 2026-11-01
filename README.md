@@ -132,6 +132,24 @@ The selector only routes Port.X to UART; UART must also be enabled in
 enable_uart=1
 ```
 
+## Release Image
+
+GitHub Actions builds the arm64 Raspberry Pi OS Desktop release image with
+`pi-gen`. The image asset is named `whisplay-plus.img.xz` and includes:
+
+- Whisplay Hat+ display and sound modules for every kernel shipped in the
+  image;
+- the `whisplay-plus.dtbo` overlay, with DSI1 selected automatically on Pi
+  3/4 and DSI0 on Pi 5/CM5;
+- the desktop demo and the touch, sound and gyro diagnostics;
+- PiSugar Power Manager, Sugar Wi-Fi configuration, Node.js 20 and automatic
+  root filesystem expansion on first boot.
+
+Pushes to `main` and `develop` build and validate the image. `develop` updates
+the `develop-latest` prerelease, while a `v*` tag creates a normal GitHub
+Release. The workflow can also be run manually; manual and `main` builds keep
+their assets as workflow artifacts instead of publishing a Release.
+
 ## Verify
 
 After reboot:
