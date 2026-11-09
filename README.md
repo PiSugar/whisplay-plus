@@ -73,6 +73,9 @@ The installer:
 - builds `snd-soc-whisplay-soundcard.ko`;
 - builds and installs the aggregate `whisplay-plus.dtbo`;
 - enables `i2c_arm`, `i2s` and `spi`;
+- on Pi 3B/3B+ and Pi 4B, explicitly enables the DSI1 control bus with
+  `dtparam=i2c_csi_dsi=on` and sets `camera_auto_detect=0`, preventing camera
+  auto-detection from blocking the GT911 touch controller;
 - adds the model-appropriate `dtoverlay=whisplay-plus` line to the boot
   `config.txt` (`display_dsi=1` is added automatically on Pi 3/4);
 - disables Labwc mouse emulation for the GT911 so browser test apps receive

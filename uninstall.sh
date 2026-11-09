@@ -32,6 +32,12 @@ rm -f "${BOOT_DIR}/overlays/${HAT_OVERLAY}.dtbo"
 sed -i "/^dtoverlay=${HAT_OVERLAY}/d" "$CONFIG"
 sed -i "/^dtoverlay=pisugar-st7701p/d" "$CONFIG"
 sed -i "/^dtoverlay=whisplay-soundcard/d" "$CONFIG"
+sed -i \
+    '/^# Whisplay Hat+ Pi 4 touch bus (managed by install.sh)$/,/^# End Whisplay Hat+ Pi 4 touch bus$/d' \
+    "$CONFIG"
+sed -i \
+    '/^# Whisplay Hat+ Pi 3\/4 touch bus (managed by install.sh)$/,/^# End Whisplay Hat+ Pi 3\/4 touch bus$/d' \
+    "$CONFIG"
 
 rm -rf /opt/whisplay-hat-plus
 rm -f /usr/share/applications/whisplay-hat-plus-demo.desktop

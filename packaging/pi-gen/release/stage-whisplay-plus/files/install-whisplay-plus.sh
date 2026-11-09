@@ -91,8 +91,12 @@ cat >> "$config_txt" <<'EOF'
 
 # Whisplay Hat+ (managed by the whisplay-plus release image)
 [pi3]
+dtparam=i2c_csi_dsi=on
+camera_auto_detect=0
 dtoverlay=whisplay-plus,display_dsi=1
 [pi4]
+dtparam=i2c_csi_dsi=on
+camera_auto_detect=0
 dtoverlay=whisplay-plus,display_dsi=1
 [pi5]
 dtoverlay=whisplay-plus

@@ -80,6 +80,44 @@ configure_overlay_line() {
     fi
 }
 
+configure_pi3_pi4_touch_bus() {
+    local model_filter=""
+    local block_start="# Whisplay Hat+ Pi 3/4 touch bus (managed by install.sh)"
+
+    case "$PLATFORM" in
+        "Raspberry Pi 3B/3B+") model_filter="pi3" ;;
+        "Raspberry Pi 4B") model_filter="pi4" ;;
+        *) return ;;
+    esac
+
+    # Pi 3/4 share the DSI1 control I2C bus with the camera/display firmware
+    # paths. Make the bus explicit and prevent camera auto-detection from
+    # claiming it before the GT911 touch controller is probed.
+    if grep -Fqx "$block_start" "$CONFIG"; then
+        sed -i \
+            "/^# Whisplay Hat+ Pi 3\/4 touch bus (managed by install.sh)$/,/^# End Whisplay Hat+ Pi 3\/4 touch bus$/d" \
+            "$CONFIG"
+    fi
+
+    # Remove the block written by the earlier Pi 4-only implementation.
+    if grep -Fqx "# Whisplay Hat+ Pi 4 touch bus (managed by install.sh)" "$CONFIG"; then
+        sed -i \
+            "/^# Whisplay Hat+ Pi 4 touch bus (managed by install.sh)$/,/^# End Whisplay Hat+ Pi 4 touch bus$/d" \
+            "$CONFIG"
+    fi
+
+    cat >> "$CONFIG" <<EOF
+
+# Whisplay Hat+ Pi 3/4 touch bus (managed by install.sh)
+[${model_filter}]
+dtparam=i2c_csi_dsi=on
+camera_auto_detect=0
+[all]
+# End Whisplay Hat+ Pi 3/4 touch bus
+EOF
+    echo "  Enabled the ${PLATFORM} DSI I2C bus and disabled camera auto-detection."
+}
+
 configure_labwc_multitouch() {
     local system_config="/etc/xdg/labwc/rc.xml"
     local desktop_user="${SUDO_USER:-}"
@@ -231,6 +269,7 @@ for param in i2c_arm=on i2s=on spi=on; do
 done
 
 configure_overlay_line
+configure_pi3_pi4_touch_bus
 
 sed -i '/^dtoverlay=pisugar-st7701p/d' "$CONFIG" 2>/dev/null || true
 sed -i '/^dtoverlay=whisplay-soundcard/d' "$CONFIG" 2>/dev/null || true
